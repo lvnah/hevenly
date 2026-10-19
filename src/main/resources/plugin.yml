@@ -2,8 +2,18 @@ name: Hevenly
 version: 1.0
 main: fr.hevenly.HevenlyPlugin
 depend: [WorldGuard]
+
 commands:
   setspawn:
-    description: Définit le spawn du serveurss
+    description: Definit le spawn du serveur
+    usage: /setspawn
+    permission: hevenly.setspawn
+
   spawn:
-    description: Se téléporter au spawn
+    description: Se teleporter au spawn
+    usage: /spawn
+
+permissions:
+  hevenly.setspawn:
+    description: Permet de definir le spawn
+    default: op
