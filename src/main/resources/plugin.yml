@@ -1,0 +1,9 @@
+name: Hevenly
+version: 1.0
+main: fr.hevenly.HevenlyPlugin
+depend: [WorldGuard]
+commands:
+  setspawn:
+    description: Définit le spawn du serveurss
+  spawn:
+    description: Se téléporter au spawn
