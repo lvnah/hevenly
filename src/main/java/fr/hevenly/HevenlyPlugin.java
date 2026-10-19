@@ -1,4 +1,3 @@
-
 package fr.hevenly;
 
 import org.bukkit.Bukkit;
