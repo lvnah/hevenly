@@ -16,7 +16,7 @@ public class HevenlyPlugin extends JavaPlugin {
         // Cree la configuration si necessaire
         saveConfig();
 
-        getLogger().info("Hevenly est active !");
+        getLogger().info("Hevenly est active ");
     }
 
     @Override
