@@ -40,7 +40,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String CONFIG_NAME = ChatColor.DARK_GRAY + "Config";
 
     private static final String[] VALID_RANKS = {
-        "default", "vip", "helper", "elite", "mod", "owner"
+        "default", "plus", "premium", "helper", "mod", "owner"
     };
 
     // Pseudos en minuscules -> grade.
@@ -180,7 +180,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             if (!Arrays.asList(VALID_RANKS).contains(newRank)) {
                 sender.sendMessage(ChatColor.RED
-                        + "Grade invalide. Grades disponibles : default, vip, helper, elite, mod, owner.");
+                        + "Grade invalide. Grades disponibles : default, plus, premium, helper, mod, owner.");
                 return true;
             }
 
@@ -258,12 +258,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 return ChatColor.DARK_RED;
             case "mod":
                 return ChatColor.DARK_PURPLE;
-            case "elite":
-                return ChatColor.AQUA;
             case "helper":
                 return ChatColor.YELLOW;
-            case "vip":
-                return ChatColor.GOLD;
+            case "premium":
+                return ChatColor.AQUA;
+            case "plus":
+                return ChatColor.GREEN;
             default:
                 return ChatColor.WHITE;
         }
@@ -287,8 +287,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         String safeName = player.getName().replace("%", "%%");
 
         event.setFormat(
-                ChatColor.DARK_GRAY + "<"
-                + nameColor + safeName
+                nameColor + safeName
                 + ChatColor.DARK_GRAY + "> "
                 + ChatColor.WHITE + "%2$s"
         );
