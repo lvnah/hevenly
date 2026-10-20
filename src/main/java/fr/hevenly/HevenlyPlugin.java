@@ -31,12 +31,19 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onEnable() {
-        saveDefaultConfig();
+        // Cree config.yml si le fichier n'existe pas encore
+        if (!getDataFolder().exists()) {
+            getDataFolder().mkdirs();
+        }
+    
+        if (!new java.io.File(getDataFolder(), "config.yml").exists()) {
+            saveConfig();
+        }
 
         Bukkit.getPluginManager().registerEvents(this, this);
-
+    
         getLogger().info("Hevenly est active !");
-    }
+}
 
     @Override
     public void onDisable() {
