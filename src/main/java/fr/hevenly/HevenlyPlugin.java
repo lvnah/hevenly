@@ -42,7 +42,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         Bukkit.getPluginManager().registerEvents(this, this);
     
-        getLogger().info("Hevenly est active !");
+        getLogger().info("Hevenly est actif !");
 }
 
     @Override
