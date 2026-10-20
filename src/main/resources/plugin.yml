@@ -13,7 +13,16 @@ commands:
     description: Se teleporter au spawn
     usage: /spawn
 
+  setrank:
+    description: Attribuer un grade a un joueur
+    usage: /setrank <joueur> <default|vip|helper|elite|mod|owner>
+    permission: hevenly.setrank
+
 permissions:
   hevenly.setspawn:
     description: Permet de definir le spawn
+    default: op
+
+  hevenly.setrank:
+    description: Permet de modifier les grades
     default: op
