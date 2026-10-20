@@ -88,7 +88,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         saveRanks();
-        getLogger().info("Hevenly est desactive !");
+        getLogger().info("Hevenly est disable !");
     }
 
     // --------------------------------------------------
