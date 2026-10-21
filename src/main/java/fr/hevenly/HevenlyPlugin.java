@@ -3,6 +3,9 @@ package fr.hevenly;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -21,12 +24,20 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
+import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.event.player.PlayerDropItemEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.Inventory;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.block.Action;
+import org.bukkit.plugin.messaging.PluginMessageListener;
+import java.io.ByteArrayOutputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -48,6 +59,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // Pseudos en minuscules -> grade.
     private final Map<String, String> playerRanks =
             new ConcurrentHashMap<String, String>();
+    private final Map<String, Boolean> nametagEnabled =
+            new ConcurrentHashMap<String, Boolean>();
+
+    private static final String GAME_GUI_TITLE = ChatColor.DARK_RED + "Hevenly » BedFight";
+    private static final String CONFIG_GUI_TITLE = ChatColor.DARK_GRAY + "Configuration du Nametag";
+    private static final String BUNGEE_CHANNEL = "BungeeCord";
 
     @Override
     public void onEnable() {
@@ -61,7 +78,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             saveConfig();
         }
 
+        getConfig().addDefault("bedfight.servers.unranked", "bedfight-unranked");
+        getConfig().addDefault("bedfight.servers.ranked", "bedfight-ranked");
+        getConfig().options().copyDefaults(true);
+        saveConfig();
+
         loadRanks();
+        loadNametagSettings();
+        getServer().getMessenger().registerOutgoingPluginChannel(this, BUNGEE_CHANNEL);
 
         // Enregistre les commandes declarees dans plugin.yml.
         if (getCommand("setspawn") != null) {
@@ -98,6 +122,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     @Override
     public void onDisable() {
         saveRanks();
+        saveNametagSettings();
+        getServer().getMessenger().unregisterOutgoingPluginChannel(this);
         getLogger().info("Hevenly est disable !");
     }
 
@@ -262,21 +288,21 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return playerRanks.getOrDefault(getPlayerKey(player), "default");
     }
 
-    private String getRankPrefix(String rank) {
+    private String getRankLabel(String rank) {
         switch (rank.toLowerCase(Locale.ROOT)) {
-            case "owner":
-                return ChatColor.DARK_RED + "[OWNER] ";
-            case "mod":
-                return ChatColor.DARK_PURPLE + "[MOD] ";
-            case "helper":
-                return ChatColor.YELLOW + "[HELPER] ";
-            case "premium":
-                return ChatColor.AQUA + "[PREM] ";
-            case "plus":
-                return ChatColor.GREEN + "[PLUS] ";
-            default:
-                return ChatColor.WHITE + "[DEFAULT] ";
+            case "owner": return "OWNER";
+            case "mod": return "MOD";
+            case "helper": return "HELPER";
+            case "premium": return "PREMIUM";
+            case "plus": return "PLUS";
+            default: return "DEFAULT";
         }
+    }
+
+    // Format demandé : §7[<couleur du grade>GRADE§7]
+    private String getRankPrefix(String rank) {
+        return ChatColor.GRAY + "[" + getRankColor(rank)
+                + getRankLabel(rank) + ChatColor.GRAY + "] ";
     }
 
     private ChatColor getRankColor(String rank) {
@@ -326,13 +352,16 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // Compatible Spigot 1.8.8
     // --------------------------------------------------
 
-    private String getRankTeamName(String rank) {
-        return "hv_" + rank;
+    private String getRankTeamName(Player target) {
+        // Une team par joueur permet au GUI de masquer son prefixe sans
+        // modifier celui des autres joueurs qui ont le meme grade.
+        String teamName = "h_" + target.getName();
+        return teamName.length() > 16 ? teamName.substring(0, 16) : teamName;
     }
 
     private void applyPlayerToBoard(Scoreboard board, Player target) {
         String rank = getRank(target);
-        String teamName = getRankTeamName(rank);
+        String teamName = getRankTeamName(target);
 
         Team team = board.getTeam(teamName);
 
@@ -341,7 +370,16 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
 
         // Prefixe [RANK] colore au-dessus de la tete et dans le TAB.
-        team.setPrefix(getRankPrefix(rank) + getRankColor(rank));
+        String teamPrefix;
+        if (nametagEnabled.getOrDefault(getPlayerKey(target), true)) {
+            String label = getRankLabel(rank);
+            // Format exact : §7[§6VIP§7]. Les libelles restent assez courts pour la limite 1.8.
+            teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label + ChatColor.GRAY + "]";
+        } else {
+            teamPrefix = getRankColor(rank).toString();
+        }
+        if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
+        team.setPrefix(teamPrefix);
         team.setSuffix("");
 
         // Evite qu'un joueur reste dans une ancienne equipe de grade.
@@ -418,14 +456,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     // --------------------------------------------------
-    // SCOREBOARD SIDEBAR
+    // SCOREBOARD SIDEBAR - mises a jour sans recreer les lignes
     // --------------------------------------------------
 
     private Scoreboard getScoreboard(Player player) {
         ScoreboardManager manager = Bukkit.getScoreboardManager();
-        if (manager == null) {
-            return player.getScoreboard();
-        }
+        if (manager == null) return player.getScoreboard();
 
         Scoreboard board = player.getScoreboard();
         if (board == manager.getMainScoreboard()) {
@@ -436,7 +472,6 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     private int getPlayerElo(Player player) {
-        // Valeur initiale si aucun systeme Elo n'a encore enregistre ce joueur.
         return getConfig().getInt("ranked.elo."
                 + player.getName().toLowerCase(Locale.ROOT), 1000);
     }
@@ -450,27 +485,24 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             if (objective == null) {
                 objective = board.registerNewObjective("hevenly", "dummy");
+                objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
+                objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+            } else {
+                if (objective.getDisplaySlot() != DisplaySlot.SIDEBAR) {
+                    objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+                }
+                if (!objective.getDisplayName().equals(ChatColor.DARK_RED + "Hevenly")) {
+                    objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
+                }
             }
 
-            objective.setDisplaySlot(DisplaySlot.SIDEBAR);
-            objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
-
-            // Les equipes assemblent prefixe + entree + suffixe pour depasser
-            // la limite de 16 caracteres par entree de Minecraft 1.8.
-            setSidebarTeamLine(board, objective, "hv_sb1", "§1",
-                    "§7§m---------------", "§7§m------------", 5);
-            setSidebarTeamLine(board, objective, "hv_sb2", "§2",
-                    "§fJoueur en ", "§fligne: §a" + onlineCount, 4);
-
             String rank = getRank(player).toUpperCase(Locale.ROOT);
-            setSidebarTeamLine(board, objective, "hv_sb3", "§3",
-                    "§fGrade: §a", rank, 3);
-
-            setSidebarTeamLine(board, objective, "hv_sb4", "§4",
-                    "§fRanked: §a", String.valueOf(getPlayerElo(player)), 2);
-
-            setSidebarTeamLine(board, objective, "hv_sb5", "§5",
-                    "§7§m---------------", "§7§m------------", 1);
+            setSidebarTeamLine(board, objective, "hv_sb1", "§1", "§7§m-----------", "", 6);
+            setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fJoueur en ", "§fligne: §a" + onlineCount, 5);
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: §a", rank, 4);
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: §a", String.valueOf(getPlayerElo(player)), 3);
+            setSidebarTeamLine(board, objective, "hv_sb5", "§5", "§7§m-----------", "", 2);
+            setSidebarTeamLine(board, objective, "hv_sb6", "§6", "§chevenly.games", "", 1);
         }
     }
 
@@ -478,26 +510,20 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                                     String teamName, String entry,
                                     String prefix, String suffix, int score) {
         Team team = board.getTeam(teamName);
-        if (team == null) {
-            team = board.registerNewTeam(teamName);
-        }
+        if (team == null) team = board.registerNewTeam(teamName);
 
-        // Limites de prefixe/suffixe dans Spigot 1.8.8.
-        if (prefix.length() > 16) {
-            prefix = prefix.substring(0, 16);
-        }
-        if (suffix.length() > 16) {
-            suffix = suffix.substring(0, 16);
-        }
+        if (prefix.length() > 16) prefix = prefix.substring(0, 16);
+        if (suffix.length() > 16) suffix = suffix.substring(0, 16);
 
-        team.setPrefix(prefix);
-        team.setSuffix(suffix);
+        if (!team.getPrefix().equals(prefix)) team.setPrefix(prefix);
+        if (!team.getSuffix().equals(suffix)) team.setSuffix(suffix);
+        if (!team.hasEntry(entry)) team.addEntry(entry);
 
-        if (!team.hasEntry(entry)) {
-            team.addEntry(entry);
+        // Ne change le score que si nécessaire : évite le clignotement côté client.
+        if (!objective.getScore(entry).isScoreSet()
+                || objective.getScore(entry).getScore() != score) {
+            objective.getScore(entry).setScore(score);
         }
-
-        objective.getScore(entry).setScore(score);
     }
 
     // --------------------------------------------------
@@ -577,6 +603,136 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         inventory.setItem(8, createConfigItem());
 
         player.updateInventory();
+    }
+
+    // --------------------------------------------------
+    // GUI GAME ET CONFIGURATION DU NAMETAG
+    // --------------------------------------------------
+
+    private ItemStack createGuiItem(Material material, String name, String... loreLines) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        meta.setDisplayName(name);
+        if (loreLines != null && loreLines.length > 0) {
+            java.util.List<String> lore = new java.util.ArrayList<String>();
+            for (String line : loreLines) lore.add(line);
+            meta.setLore(lore);
+        }
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private void openGameGui(Player player) {
+        Inventory inventory = Bukkit.createInventory(null, 27, GAME_GUI_TITLE);
+        inventory.setItem(11, createGuiItem(Material.IRON_SWORD,
+                ChatColor.GREEN + "BedFight 1v1 Unranked",
+                ChatColor.GRAY + "Partie sans Elo", ChatColor.YELLOW + "Clique pour rejoindre"));
+        inventory.setItem(15, createGuiItem(Material.DIAMOND_SWORD,
+                ChatColor.RED + "BedFight 1v1 Ranked",
+                ChatColor.GRAY + "Partie classee", ChatColor.YELLOW + "Clique pour rejoindre"));
+        inventory.setItem(13, createGuiItem(Material.BOOK,
+                ChatColor.DARK_RED + "Hevenly BedFight",
+                ChatColor.GRAY + "Choisis ton mode de jeu"));
+        player.openInventory(inventory);
+    }
+
+    private void openNametagGui(Player player) {
+        Inventory inventory = Bukkit.createInventory(null, 27, CONFIG_GUI_TITLE);
+        boolean enabled = nametagEnabled.getOrDefault(getPlayerKey(player), true);
+        inventory.setItem(13, createGuiItem(enabled ? Material.NAME_TAG : Material.BARRIER,
+                (enabled ? ChatColor.GREEN : ChatColor.RED) + "Prefixe du grade : "
+                        + (enabled ? "ACTIVE" : "DESACTIVE"),
+                ChatColor.GRAY + "Affiche le grade au-dessus de la tete et dans le TAB.",
+                ChatColor.YELLOW + "Clique pour changer"));
+        inventory.setItem(22, createGuiItem(Material.ARROW,
+                ChatColor.GRAY + "Fermer", ChatColor.DARK_GRAY + "Retour au jeu"));
+        player.openInventory(inventory);
+    }
+
+    private void connectToServer(Player player, String mode) {
+        String path = "bedfight.servers." + mode;
+        String serverName = getConfig().getString(path, "").trim();
+        if (serverName.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "Le serveur BedFight n'est pas configure.");
+            return;
+        }
+
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+            out.writeUTF("Connect");
+            out.writeUTF(serverName);
+            player.sendPluginMessage(this, BUNGEE_CHANNEL, bytes.toByteArray());
+            player.closeInventory();
+        } catch (IOException ex) {
+            player.sendMessage(ChatColor.RED + "Impossible de rejoindre ce serveur.");
+            getLogger().warning("Erreur de connexion BungeeCord : " + ex.getMessage());
+        }
+    }
+
+    private void loadNametagSettings() {
+        nametagEnabled.clear();
+        if (!getConfig().isConfigurationSection("nametag.enabled")) return;
+        for (String name : getConfig().getConfigurationSection("nametag.enabled").getKeys(false)) {
+            nametagEnabled.put(name.toLowerCase(Locale.ROOT),
+                    getConfig().getBoolean("nametag.enabled." + name, true));
+        }
+    }
+
+    private void saveNametagSettings() {
+        getConfig().set("nametag.enabled", null);
+        for (Map.Entry<String, Boolean> entry : nametagEnabled.entrySet()) {
+            getConfig().set("nametag.enabled." + entry.getKey(), entry.getValue());
+        }
+        saveConfig();
+    }
+
+    @EventHandler
+    public void onSpecialItemUse(PlayerInteractEvent event) {
+        if (event.getAction() != Action.RIGHT_CLICK_AIR
+                && event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        ItemStack item = event.getItem();
+        if (item == null || !item.hasItemMeta() || !item.getItemMeta().hasDisplayName()) return;
+
+        String name = item.getItemMeta().getDisplayName();
+        if (item.getType() == Material.COMPASS && GAME_NAME.equals(name)) {
+            event.setCancelled(true);
+            openGameGui(event.getPlayer());
+        } else if (item.getType() == Material.NAME_TAG && CONFIG_NAME.equals(name)) {
+            event.setCancelled(true);
+            openNametagGui(event.getPlayer());
+        }
+    }
+
+    @EventHandler
+    public void onHevenlyGuiClick(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player)) return;
+        String title = event.getView().getTitle();
+        if (!GAME_GUI_TITLE.equals(title) && !CONFIG_GUI_TITLE.equals(title)) return;
+        event.setCancelled(true);
+        if (event.getRawSlot() < 0 || event.getRawSlot() >= event.getView().getTopInventory().getSize()) return;
+
+        Player player = (Player) event.getWhoClicked();
+        if (GAME_GUI_TITLE.equals(title)) {
+            if (event.getRawSlot() == 11) {
+                connectToServer(player, "unranked");
+            } else if (event.getRawSlot() == 15) {
+                connectToServer(player, "ranked");
+            }
+        } else if (CONFIG_GUI_TITLE.equals(title)) {
+            if (event.getRawSlot() == 13) {
+                String key = getPlayerKey(player);
+                boolean enabled = !nametagEnabled.getOrDefault(key, true);
+                nametagEnabled.put(key, enabled);
+                saveNametagSettings();
+                refreshAllBoards();
+                openNametagGui(player);
+                player.sendMessage(ChatColor.GREEN + "Prefixe du grade "
+                        + (enabled ? "active" : "desactive") + ".");
+            } else if (event.getRawSlot() == 22) {
+                player.closeInventory();
+            }
+        }
     }
 
     // --------------------------------------------------
@@ -713,6 +869,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onInventoryDrag(InventoryDragEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) {
+            return;
+        }
+
+        String viewTitle = event.getView().getTitle();
+        if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)) {
+            event.setCancelled(true);
             return;
         }
 
