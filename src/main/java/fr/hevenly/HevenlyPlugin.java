@@ -500,12 +500,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             String rank = getRank(player).toUpperCase(Locale.ROOT);
-            setSidebarTeamLine(board, objective, "hv_sb1", "§1", "§7§m-----------", "", 6);
+            setSidebarTeamLine(board, objective, "hv_sb1", "§1", "§7§m--------------------------", "", 6);
             setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fJoueur en ", "§fligne: §a" + onlineCount, 5);
             // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
             setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 4);
-            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: ", "§a" + getPlayerElo(player), 3);
-            setSidebarTeamLine(board, objective, "hv_sb5", "§5", "§7§m-----------", "", 2);
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo: ", "§a" + getPlayerElo(player), 3);
+            setSidebarTeamLine(board, objective, "hv_sb5", "§5", "§7§m--------------------------", "", 2);
             setSidebarTeamLine(board, objective, "hv_sb6", "§6", "§chevenly.games", "", 1);
         }
     }
