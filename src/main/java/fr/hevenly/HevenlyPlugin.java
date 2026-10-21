@@ -30,6 +30,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scoreboard.DisplaySlot;
+import org.bukkit.scoreboard.Objective;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
 import org.bukkit.scoreboard.Team;
@@ -73,6 +75,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
 
         Bukkit.getPluginManager().registerEvents(this, this);
+
+        // Met a jour le scoreboard une fois par seconde.
+        Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
+            @Override
+            public void run() {
+                updateScoreboards();
+            }
+        }, 0L, 20L);
 
         // Actualise les grades et les couleurs après le chargement.
         Bukkit.getScheduler().runTaskLater(this, new Runnable() {
@@ -164,7 +174,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             if (args.length != 2) {
                 sender.sendMessage(ChatColor.RED
-                        + "Utilisation : /setrank <joueur> <default|vip|helper|elite|mod|owner>");
+                        + "Utilisation : /setrank <joueur> <default|plus|premium|helper|mod|owner>");
                 return true;
             }
 
@@ -252,6 +262,23 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return playerRanks.getOrDefault(getPlayerKey(player), "default");
     }
 
+    private String getRankPrefix(String rank) {
+        switch (rank.toLowerCase(Locale.ROOT)) {
+            case "owner":
+                return ChatColor.DARK_RED + "[OWNER] ";
+            case "mod":
+                return ChatColor.DARK_PURPLE + "[MOD] ";
+            case "helper":
+                return ChatColor.YELLOW + "[HELPER] ";
+            case "premium":
+                return ChatColor.AQUA + "[PREM] ";
+            case "plus":
+                return ChatColor.GREEN + "[PLUS] ";
+            default:
+                return ChatColor.WHITE + "[DEFAULT] ";
+        }
+    }
+
     private ChatColor getRankColor(String rank) {
         switch (rank.toLowerCase(Locale.ROOT)) {
             case "owner":
@@ -286,9 +313,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         // Echappe les pourcentages pour eviter les erreurs de formatage.
         String safeName = player.getName().replace("%", "%%");
 
+        String rankPrefix = getRankPrefix(getRank(player));
         event.setFormat(
-                nameColor + safeName
-                + ChatColor.DARK_GRAY + "> "
+                ChatColor.RESET + rankPrefix + nameColor + safeName
+                + ChatColor.DARK_GRAY + " > "
                 + ChatColor.WHITE + "%2$s"
         );
     }
@@ -312,8 +340,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             team = board.registerNewTeam(teamName);
         }
 
-        // Prefixe colore le pseudo au-dessus de la tete et dans le TAB.
-        team.setPrefix(getRankColor(rank).toString());
+        // Prefixe [RANK] colore au-dessus de la tete et dans le TAB.
+        team.setPrefix(getRankPrefix(rank) + getRankColor(rank));
         team.setSuffix("");
 
         // Evite qu'un joueur reste dans une ancienne equipe de grade.
@@ -353,7 +381,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private void updatePlayerVisuals(Player target) {
         // Le display name est egalement utilise par certains plugins de chat.
         target.setDisplayName(
-                getRankColor(getRank(target)) + target.getName() + ChatColor.RESET
+                getRankPrefix(getRank(target)) + getRankColor(getRank(target))
+                + target.getName() + ChatColor.RESET
         );
 
         for (Player viewer : Bukkit.getOnlinePlayers()) {
@@ -378,13 +407,97 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private void refreshAllVisuals() {
         for (Player player : Bukkit.getOnlinePlayers()) {
             player.setDisplayName(
-                    getRankColor(getRank(player))
+                    getRankPrefix(getRank(player))
+                    + getRankColor(getRank(player))
                     + player.getName()
                     + ChatColor.RESET
             );
         }
 
         refreshAllBoards();
+    }
+
+    // --------------------------------------------------
+    // SCOREBOARD SIDEBAR
+    // --------------------------------------------------
+
+    private Scoreboard getScoreboard(Player player) {
+        ScoreboardManager manager = Bukkit.getScoreboardManager();
+        if (manager == null) {
+            return player.getScoreboard();
+        }
+
+        Scoreboard board = player.getScoreboard();
+        if (board == manager.getMainScoreboard()) {
+            board = manager.getNewScoreboard();
+            player.setScoreboard(board);
+        }
+        return board;
+    }
+
+    private int getPlayerElo(Player player) {
+        // Valeur initiale si aucun systeme Elo n'a encore enregistre ce joueur.
+        return getConfig().getInt("ranked.elo."
+                + player.getName().toLowerCase(Locale.ROOT), 1000);
+    }
+
+    private void updateScoreboards() {
+        int onlineCount = Bukkit.getOnlinePlayers().size();
+
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            Scoreboard board = getScoreboard(player);
+            Objective objective = board.getObjective("hevenly");
+
+            if (objective == null) {
+                objective = board.registerNewObjective("hevenly", "dummy");
+            }
+
+            objective.setDisplaySlot(DisplaySlot.SIDEBAR);
+            objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
+
+            // Les equipes assemblent prefixe + entree + suffixe pour depasser
+            // la limite de 16 caracteres par entree de Minecraft 1.8.
+            setSidebarTeamLine(board, objective, "hv_sb1", "§1",
+                    "§7§m---------------", "§7§m------------", 5);
+            setSidebarTeamLine(board, objective, "hv_sb2", "§2",
+                    "§fJoueur en ", "§fligne: §a" + onlineCount, 4);
+
+            String rank = getRank(player).toUpperCase(Locale.ROOT);
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3",
+                    "§fGrade: §a", rank, 3);
+
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4",
+                    "§fRanked: §a", String.valueOf(getPlayerElo(player)), 2);
+
+            setSidebarTeamLine(board, objective, "hv_sb5", "§5",
+                    "§7§m---------------", "§7§m------------", 1);
+        }
+    }
+
+    private void setSidebarTeamLine(Scoreboard board, Objective objective,
+                                    String teamName, String entry,
+                                    String prefix, String suffix, int score) {
+        Team team = board.getTeam(teamName);
+        if (team == null) {
+            team = board.registerNewTeam(teamName);
+        }
+
+        // Limites de prefixe/suffixe dans Spigot 1.8.8.
+        if (prefix.length() > 16) {
+            prefix = prefix.substring(0, 16);
+        }
+        if (suffix.length() > 16) {
+            suffix = suffix.substring(0, 16);
+        }
+
+        team.setPrefix(prefix);
+        team.setSuffix(suffix);
+
+        if (!team.hasEntry(entry)) {
+            team.addEntry(entry);
+        }
+
+        objective.getScore(entry).setScore(score);
     }
 
     // --------------------------------------------------
@@ -495,6 +608,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             public void run() {
                 if (player.isOnline()) {
                     refreshAllVisuals();
+                    updateScoreboards();
                 }
             }
         }, 2L);
@@ -548,6 +662,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 if (player.isOnline()) {
                     giveSpecialItems(player);
                     updatePlayerVisuals(player);
+                    updateScoreboards();
                 }
             }
         });
