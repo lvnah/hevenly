@@ -1,28 +1,43 @@
 name: Hevenly
-version: 1.0
+version: 1.1
 main: fr.hevenly.HevenlyPlugin
 depend: [WorldGuard]
 
 commands:
   setspawn:
-    description: Definit le spawn du serveur
+    description: Definit le spawn du lobby
     usage: /setspawn
     permission: hevenly.setspawn
-
   spawn:
-    description: Se teleporter au spawn
+    description: Se teleporter au spawn du lobby
     usage: /spawn
-
   setrank:
     description: Attribuer un grade a un joueur
-    usage: /setrank <joueur> <default|vip|helper|elite|mod|owner>
+    usage: /setrank <joueur> <default|plus|premium|helper|mod|owner>
     permission: hevenly.setrank
+  bfsetspawn:
+    description: Definit le spawn de l'equipe BedFight rouge ou bleue
+    usage: /bfsetspawn <red|blue>
+    permission: hevenly.bedfight.admin
+  bfsetbed:
+    description: Enregistre le lit de l'equipe rouge ou bleue en regardant le lit
+    usage: /bfsetbed <red|blue>
+    permission: hevenly.bedfight.admin
+  bfstart:
+    description: Demarre une partie avec les deux premiers joueurs en attente
+    usage: /bfstart
+    permission: hevenly.bedfight.admin
+  bfleave:
+    description: Quitter la file d'attente BedFight
+    usage: /bfleave
 
 permissions:
   hevenly.setspawn:
-    description: Permet de definir le spawn
+    description: Permet de definir le spawn du lobby
     default: op
-
   hevenly.setrank:
     description: Permet de modifier les grades
+    default: op
+  hevenly.bedfight.admin:
+    description: Permet de configurer et administrer BedFight
     default: op
