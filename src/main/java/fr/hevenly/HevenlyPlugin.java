@@ -369,12 +369,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             team = board.registerNewTeam(teamName);
         }
 
-        // Prefixe [RANK] colore au-dessus de la tete et dans le TAB.
+        // Prefixe [RANK] puis un espace ; le pseudo prend la couleur du grade.
+        // En 1.8, le prefixe d'une equipe est limite a 16 caracteres (codes couleur inclus).
         String teamPrefix;
         if (nametagEnabled.getOrDefault(getPlayerKey(target), true)) {
             String label = getRankLabel(rank);
-            // Format exact : §7[§6VIP§7]. Les libelles restent assez courts pour la limite 1.8.
-            teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label + ChatColor.GRAY + "]";
+            if ("default".equalsIgnoreCase(rank)) label = "DEF";
+            if ("premium".equalsIgnoreCase(rank)) label = "PREM";
+            teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label
+                    + ChatColor.GRAY + "] " + getRankColor(rank);
         } else {
             teamPrefix = getRankColor(rank).toString();
         }
@@ -499,8 +502,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             String rank = getRank(player).toUpperCase(Locale.ROOT);
             setSidebarTeamLine(board, objective, "hv_sb1", "§1", "§7§m-----------", "", 6);
             setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fJoueur en ", "§fligne: §a" + onlineCount, 5);
-            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: §a", rank, 4);
-            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: §a", String.valueOf(getPlayerElo(player)), 3);
+            // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 4);
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: ", "§a" + getPlayerElo(player), 3);
             setSidebarTeamLine(board, objective, "hv_sb5", "§5", "§7§m-----------", "", 2);
             setSidebarTeamLine(board, objective, "hv_sb6", "§6", "§chevenly.games", "", 1);
         }
