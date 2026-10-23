@@ -73,6 +73,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     private static final String GAME_GUI_TITLE = ChatColor.DARK_RED + "Hevenly » BedFight";
     private static final String CONFIG_GUI_TITLE = ChatColor.DARK_GRAY + "Configuration";
+    private static final String COLOR_GUI_TITLE = ChatColor.DARK_GRAY + "Couleur du pseudo";
     private static final String BUNGEE_CHANNEL = "BungeeCord";
     private static final String[] STAFF_RANKS = {"owner", "mod", "helper"};
     private static final String QUEUE_LEAVE_NAME = ChatColor.RED + "Quitter la file";
@@ -87,6 +88,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // Pseudos en minuscules -> couleur d'equipe pendant un match (pas de grade au-dessus de la tete).
     private final Map<String, ChatColor> matchColors =
             new ConcurrentHashMap<String, ChatColor>();
+    // Pseudos en minuscules -> couleur choisie (grades plus, premium, mod, owner).
+    private final Map<String, PlayerColor> colorChoices =
+            new ConcurrentHashMap<String, PlayerColor>();
     static final int KIT_LAYOUT_COUNT = 3;
     static final String PREFIX = ChatColor.GRAY + "[" + ChatColor.DARK_RED + "Hevenly"
             + ChatColor.GRAY + "] " + ChatColor.WHITE;
@@ -482,7 +486,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
 
-        ChatColor nameColor = getRankColor(getRank(player));
+        PlayerColor chosen = getColorChoice(player);
+        ChatColor nameColor = chosen != null ? chosen.chat : getRankColor(getRank(player));
 
         // Les joueurs ne peuvent pas utiliser de codes couleur dans leur message.
         String message = ChatColor.stripColor(event.getMessage());
@@ -525,18 +530,20 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         // En 1.8, le prefixe d'une equipe est limite a 16 caracteres (codes couleur inclus).
         String teamPrefix;
         ChatColor matchColor = matchColors.get(getPlayerKey(target));
+        PlayerColor chosen = getColorChoice(target);
+        ChatColor nameColor = chosen != null ? chosen.chat : null;
         if (matchColor != null) {
-            // En match : pas de grade, le pseudo a la couleur de l'equipe.
-            teamPrefix = matchColor.toString();
+            // En match : pas de grade, le pseudo a la couleur choisie ou celle de l'equipe.
+            teamPrefix = (nameColor != null ? nameColor : matchColor).toString();
         } else if (!nametagEnabled.getOrDefault(getPlayerKey(target), true)
                 || "default".equalsIgnoreCase(rank)) {
             // Grade default : pas de prefixe, pseudo blanc.
-            teamPrefix = getRankColor(rank).toString();
+            teamPrefix = (nameColor != null ? nameColor : getRankColor(rank)).toString();
         } else {
             String label = getRankLabel(rank);
             if ("premium".equalsIgnoreCase(rank)) label = "PREM";
             teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label
-                    + ChatColor.GRAY + "] " + getRankColor(rank);
+                    + ChatColor.GRAY + "] " + (nameColor != null ? nameColor : getRankColor(rank));
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
         team.setPrefix(teamPrefix);
@@ -786,6 +793,48 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return kitLayouts.getOrDefault(getPlayerKey(player), 0);
     }
 
+    static boolean canChooseColor(String rank) {
+        return "plus".equalsIgnoreCase(rank) || "premium".equalsIgnoreCase(rank)
+                || "mod".equalsIgnoreCase(rank) || "owner".equalsIgnoreCase(rank);
+    }
+
+    // Couleur choisie, seulement si le grade le permet.
+    PlayerColor getColorChoice(Player player) {
+        if (!canChooseColor(getRank(player))) return null;
+        return colorChoices.get(getPlayerKey(player));
+    }
+
+    private void setColorChoice(Player player, PlayerColor color) {
+        String key = getPlayerKey(player);
+        if (color == null) {
+            colorChoices.remove(key);
+        } else {
+            colorChoices.put(key, color);
+        }
+        saveNametagSettings();
+        refreshAllBoards();
+    }
+
+    private void openColorGui(Player player) {
+        Inventory inventory = Bukkit.createInventory(null, 27, COLOR_GUI_TITLE);
+        PlayerColor current = getColorChoice(player);
+        PlayerColor[] colors = PlayerColor.values();
+        for (int i = 0; i < colors.length; i++) {
+            PlayerColor color = colors[i];
+            ItemStack item = new ItemStack(Material.WOOL, 1, (short) 0, color.dye.getWoolData());
+            ItemMeta meta = item.getItemMeta();
+            meta.setDisplayName(color.chat + color.label
+                    + (color == current ? ChatColor.GRAY + " (choisie)" : ""));
+            item.setItemMeta(meta);
+            inventory.setItem(10 + i, item);
+        }
+        inventory.setItem(22, createGuiItem(Material.ARROW,
+                ChatColor.GRAY + "Retour", ChatColor.DARK_GRAY + "Retour a la configuration"));
+        inventory.setItem(23, createGuiItem(Material.BARRIER,
+                ChatColor.RED + "Couleur par defaut", ChatColor.GRAY + "Retire ta couleur personnalisee"));
+        player.openInventory(inventory);
+    }
+
     // Pendant un match, le pseudo prend la couleur de l'equipe (null = remettre le grade).
     void setMatchColor(Player player, ChatColor color) {
         String key = getPlayerKey(player);
@@ -839,6 +888,13 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                         + (enabled ? "ACTIVE" : "DESACTIVE"),
                 ChatColor.GRAY + "Affiche le grade au-dessus de la tete et dans le TAB.",
                 ChatColor.YELLOW + "Clique pour changer"));
+        PlayerColor chosen = getColorChoice(player);
+        inventory.setItem(13, createGuiItem(Material.WOOL,
+                ChatColor.AQUA + "Couleur du pseudo",
+                ChatColor.GRAY + "Pseudo, laine et armure : " + (chosen == null ? "par defaut" : chosen.label),
+                canChooseColor(getRank(player))
+                        ? ChatColor.YELLOW + "Clique pour changer"
+                        : ChatColor.RED + "Reserve aux grades Plus, Premium, Mod et Owner"));
         inventory.setItem(15, createGuiItem(Material.CHEST,
                 ChatColor.AQUA + "Disposition du kit BedFight",
                 ChatColor.GRAY + "Disposition " + (getKitLayout(player) + 1) + " / " + KIT_LAYOUT_COUNT,
@@ -892,6 +948,17 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                         getConfig().getBoolean("nametag.enabled." + name, true));
             }
         }
+        colorChoices.clear();
+        if (getConfig().isConfigurationSection("colors")) {
+            for (String name : getConfig().getConfigurationSection("colors").getKeys(false)) {
+                try {
+                    colorChoices.put(name.toLowerCase(Locale.ROOT),
+                            PlayerColor.valueOf(getConfig().getString("colors." + name, "")));
+                } catch (IllegalArgumentException ignored) {
+                    // Couleur inconnue dans la config : on l'ignore.
+                }
+            }
+        }
         if (getConfig().isConfigurationSection("layout.kit")) {
             for (String name : getConfig().getConfigurationSection("layout.kit").getKeys(false)) {
                 kitLayouts.put(name.toLowerCase(Locale.ROOT),
@@ -904,6 +971,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         getConfig().set("nametag.enabled", null);
         for (Map.Entry<String, Boolean> entry : nametagEnabled.entrySet()) {
             getConfig().set("nametag.enabled." + entry.getKey(), entry.getValue());
+        }
+        getConfig().set("colors", null);
+        for (Map.Entry<String, PlayerColor> entry : colorChoices.entrySet()) {
+            getConfig().set("colors." + entry.getKey(), entry.getValue().name());
         }
         getConfig().set("layout.kit", null);
         for (Map.Entry<String, Integer> entry : kitLayouts.entrySet()) {
@@ -959,11 +1030,29 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onHevenlyGuiClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
         String title = event.getView().getTitle();
-        if (!GAME_GUI_TITLE.equals(title) && !CONFIG_GUI_TITLE.equals(title)) return;
+        if (!GAME_GUI_TITLE.equals(title) && !CONFIG_GUI_TITLE.equals(title)
+                && !COLOR_GUI_TITLE.equals(title)) return;
         event.setCancelled(true);
         if (event.getRawSlot() < 0 || event.getRawSlot() >= event.getView().getTopInventory().getSize()) return;
 
         Player player = (Player) event.getWhoClicked();
+        if (COLOR_GUI_TITLE.equals(title)) {
+            int slot = event.getRawSlot();
+            PlayerColor[] colors = PlayerColor.values();
+            if (slot >= 10 && slot < 10 + colors.length) {
+                PlayerColor picked = colors[slot - 10];
+                setColorChoice(player, picked);
+                player.sendMessage(PREFIX + "Couleur choisie : " + picked.chat + picked.label + ChatColor.WHITE + ".");
+                openColorGui(player);
+            } else if (slot == 23) {
+                setColorChoice(player, null);
+                player.sendMessage(PREFIX + "Couleur par defaut restauree.");
+                openColorGui(player);
+            } else if (slot == 22) {
+                openNametagGui(player);
+            }
+            return;
+        }
         if (GAME_GUI_TITLE.equals(title)) {
             if (event.getRawSlot() == 11) {
                 connectToServer(player, "unranked");
@@ -982,6 +1071,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 openNametagGui(player);
                 player.sendMessage(ChatColor.GREEN + "Prefixe du grade "
                         + (enabled ? "active" : "desactive") + ".");
+            } else if (event.getRawSlot() == 13) {
+                if (!canChooseColor(getRank(player))) {
+                    player.sendMessage(PREFIX + "Cette option est reservee aux grades Plus, Premium, Mod et Owner.");
+                    return;
+                }
+                openColorGui(player);
             } else if (event.getRawSlot() == 15) {
                 if (bedFightManager.isInMatch(player)) {
                     player.sendMessage(ChatColor.RED + "Tu ne peux pas changer la disposition pendant une partie.");
@@ -1188,7 +1283,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
 
         String viewTitle = event.getView().getTitle();
-        if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)) {
+        if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)
+                || COLOR_GUI_TITLE.equals(viewTitle)) {
             event.setCancelled(true);
             return;
         }

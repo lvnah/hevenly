@@ -16,6 +16,7 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Color;
+import org.bukkit.DyeColor;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -54,6 +55,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     };
     // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
     private static final int MAX_BUILD_HEIGHT = 10;
+    // Rayon de la laine recolore autour du spawn de l'equipe.
+    private static final int ISLAND_RADIUS = 4;
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
     private static final String ARENA_PREFIX = "bedfight.arenas.";
 
@@ -451,9 +454,37 @@ public class BedFightManager implements Listener, CommandExecutor {
             Player player = Bukkit.getPlayer(id);
             if (player != null) preparePlayer(match, player, match.teams.get(id));
         }
+        recolorIsland(match, "red");
+        recolorIsland(match, "blue");
         broadcastMatch(match, ChatColor.GOLD + "La partie commence ! " + teamNames(match, "red")
                 + ChatColor.GRAY + " contre " + teamNames(match, "blue") + ChatColor.GOLD + ".");
         checkMatchEnd(match, "");
+    }
+
+    // Laine autour du spawn de l'equipe : couleur du premier joueur de l'equipe, si elle a choisi une couleur.
+    // Les blocs d'origine sont restaures a la fin du match.
+    private void recolorIsland(Match match, String team) {
+        List<UUID> members = membersOf(match, team);
+        if (members.isEmpty()) return;
+        Player player = Bukkit.getPlayer(members.get(0));
+        PlayerColor chosen = player == null ? null : plugin.getColorChoice(player);
+        Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
+        if (chosen == null || spawn == null) return;
+
+        World world = spawn.getWorld();
+        int cx = spawn.getBlockX();
+        int cy = spawn.getBlockY();
+        int cz = spawn.getBlockZ();
+        for (int x = cx - ISLAND_RADIUS; x <= cx + ISLAND_RADIUS; x++) {
+            for (int y = cy - 2; y <= cy + 2; y++) {
+                for (int z = cz - ISLAND_RADIUS; z <= cz + ISLAND_RADIUS; z++) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (block.getType() != Material.WOOL || block.getData() == chosen.dye.getWoolData()) continue;
+                    match.rememberOriginal(new BlockKey(world.getName(), x, y, z), Material.WOOL, block.getData());
+                    block.setData(chosen.dye.getWoolData(), false);
+                }
+            }
+        }
     }
 
     private void addToMatch(Match match, UUID id, String team) {
@@ -967,17 +998,19 @@ public class BedFightManager implements Listener, CommandExecutor {
     // Kit identique pour tous les BedFight : cuir teinte aux couleurs de l'equipe.
     private void giveMatchKit(Player player, String team) {
         boolean red = "red".equals(team);
+        PlayerColor chosen = plugin.getColorChoice(player);
+        DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.BLUE);
+        Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.BLUE);
         PlayerInventory inv = player.getInventory();
         inv.clear();
         inv.setArmorContents(null);
         // Ordre des objets : epee, laine, cisaille, hache ; la disposition vient du menu Config.
         int[] slots = KIT_SLOTS[plugin.getKitLayout(player) % KIT_SLOTS.length];
         inv.setItem(slots[0], unbreakable(new ItemStack(Material.WOOD_SWORD)));
-        inv.setItem(slots[1], new ItemStack(Material.WOOL, 64, (short) 0, (byte) (red ? 14 : 11)));
+        inv.setItem(slots[1], new ItemStack(Material.WOOL, 64, (short) 0, dye.getWoolData()));
         inv.setItem(slots[2], unbreakable(new ItemStack(Material.SHEARS)));
         inv.setItem(slots[3], namedUnbreakable(Material.WOOD_AXE, MATCH_AXE_NAME));
         inv.setItem(4, new ItemStack(Material.WOOD_PICKAXE));
-        Color color = red ? Color.RED : Color.BLUE;
         inv.setHelmet(leather(Material.LEATHER_HELMET, color));
         inv.setChestplate(leather(Material.LEATHER_CHESTPLATE, color));
         inv.setLeggings(leather(Material.LEATHER_LEGGINGS, color));
@@ -1073,8 +1106,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + match.teams.get(player.getUniqueId()));
         if (spawn != null && event.getBlockPlaced().getY() > spawn.getBlockY() + MAX_BUILD_HEIGHT) {
             event.setCancelled(true);
-            player.sendMessage(ChatColor.RED + "Tu ne peux pas construire plus de "
-                    + MAX_BUILD_HEIGHT + " blocs au-dessus du spawn.");
             return;
         }
 
@@ -1107,7 +1138,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         UUID id = player.getUniqueId();
         String team = match.teams.get(id);
         if (Boolean.TRUE.equals(match.bedAlive.get(team))) {
-            player.sendMessage(ChatColor.GREEN + "Ton lit est encore intact : tu peux revenir dans la partie !");
             return;
         }
 
