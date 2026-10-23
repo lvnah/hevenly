@@ -29,7 +29,6 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
@@ -55,6 +54,27 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     public boolean isEnabled() {
         return plugin.getConfig().getBoolean("bedfight.enabled", false);
+    }
+
+    public boolean isInMatch(Player player) {
+        return matchRunning && teams.containsKey(player.getUniqueId());
+    }
+
+    // Appele par le GUI de la boussole : le joueur rejoint la file sur ce serveur.
+    public void joinQueue(Player player) {
+        if (!isEnabled()) {
+            player.sendMessage(ChatColor.RED + "Le BedFight n'est pas active sur ce serveur.");
+            return;
+        }
+        if (isInMatch(player)) {
+            player.sendMessage(ChatColor.RED + "Tu es deja dans une partie.");
+            return;
+        }
+        if (queue.contains(player.getUniqueId())) {
+            player.sendMessage(ChatColor.RED + "Tu es deja dans la file d'attente.");
+            return;
+        }
+        addToQueue(player);
     }
 
     public void register() {
@@ -284,27 +304,11 @@ public class BedFightManager implements Listener, CommandExecutor {
         return null;
     }
 
-    @EventHandler
-    public void onJoin(PlayerJoinEvent event) {
-        if (!isEnabled()) return;
-        Player player = event.getPlayer();
-        player.getInventory().clear();
-        player.getInventory().setArmorContents(null);
-        if (matchRunning && teams.size() >= 2) {
-            if (!queue.contains(player.getUniqueId())) queue.add(player.getUniqueId());
-            player.sendMessage(ChatColor.YELLOW + "Une partie est en cours. Tu es dans la file d'attente.");
-            Location lobby = getLobbySpawn();
-            if (lobby != null) player.teleport(lobby);
-        } else {
-            addToQueue(player);
-        }
-    }
-
     private void addToQueue(Player player) {
         if (teams.containsKey(player.getUniqueId()) || queue.contains(player.getUniqueId())) return;
         queue.add(player.getUniqueId());
-        player.getInventory().clear();
-        player.getInventory().setArmorContents(null);
+        // Garde la boussole et le name tag : ce sont les seuls moyens de quitter la file.
+        plugin.giveSpecialItems(player);
         Location lobby = getLobbySpawn();
         if (lobby != null) player.teleport(lobby);
         player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
@@ -468,12 +472,10 @@ public class BedFightManager implements Listener, CommandExecutor {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onRespawn(PlayerRespawnEvent event) {
         if (!isEnabled()) return;
+        // Hors partie, le respawn au lobby est gere par HevenlyPlugin.
         String team = teams.get(event.getPlayer().getUniqueId());
-        if (team == null || !matchRunning) {
-            Location lobby = getLobbySpawn();
-            if (lobby != null) event.setRespawnLocation(lobby);
-            return;
-        }
+        if (team == null || !matchRunning) return;
+
         if (Boolean.TRUE.equals(bedAlive.get(team))) {
             Location spawn = readLocation("bedfight.spawns." + team);
             if (spawn != null) event.setRespawnLocation(spawn);
@@ -489,8 +491,6 @@ public class BedFightManager implements Listener, CommandExecutor {
                 String currentTeam = teams.get(player.getUniqueId());
                 if (currentTeam != null && matchRunning && Boolean.TRUE.equals(bedAlive.get(currentTeam))) {
                     prepareRespawnInventory(player, currentTeam);
-                } else {
-                    player.getInventory().clear();
                 }
             }
         }, 2L);
