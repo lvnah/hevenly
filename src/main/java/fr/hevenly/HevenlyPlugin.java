@@ -1162,7 +1162,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onFoodChange(FoodLevelChangeEvent event) {
-        if (event.getFoodLevel() < event.getEntity().getFoodLevel()) {
+        if (!(event.getEntity() instanceof Player)) return;
+        Player player = (Player) event.getEntity();
+        if (event.getFoodLevel() < player.getFoodLevel()) {
             event.setCancelled(true);
         }
     }
