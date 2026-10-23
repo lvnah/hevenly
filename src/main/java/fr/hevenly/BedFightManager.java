@@ -87,6 +87,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     // File 1v1 classee : joueurs apparies selon leur elo.
     private final List<UUID> rankedQueue = new ArrayList<UUID>();
     private final Map<UUID, Long> rankedSince = new HashMap<UUID, Long>();
+    // Moment d'entree en file, pour le temps d'attente affiche au scoreboard.
+    private final Map<UUID, Long> queuedAt = new HashMap<UUID, Long>();
     // File 2v2 non classee : un groupe par entree.
     private final List<Party> duoQueue = new ArrayList<Party>();
     // Groupes 2v2 : chaque membre pointe vers le meme objet.
@@ -117,17 +119,40 @@ public class BedFightManager implements Listener, CommandExecutor {
         String team = match.teams.get(player.getUniqueId());
         String enemy = "red".equals(team) ? "blue" : "red";
 
+        // Plusieurs adversaires : pseudos plus courts pour tenir sur la ligne.
+        List<UUID> opponents = membersOf(match, enemy);
+        int limit = opponents.size() > 1 ? 7 : 14;
         StringBuilder names = new StringBuilder();
-        for (UUID id : membersOf(match, enemy)) {
+        for (UUID id : opponents) {
             Player opponent = Bukkit.getPlayer(id);
             if (names.length() > 0) names.append(", ");
-            names.append(opponent == null ? "?" : opponent.getName());
+            names.append(shortName(opponent == null ? "?" : opponent.getName(), limit));
         }
 
         long seconds = (System.currentTimeMillis() - match.startedAt) / 1000L;
         String duration = String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
-        boolean destroyed = !Boolean.TRUE.equals(match.bedAlive.get(enemy));
+        // Son propre lit : detruit par l'adversaire ou non.
+        boolean destroyed = !Boolean.TRUE.equals(match.bedAlive.get(team));
         return new String[] {names.length() == 0 ? "?" : names.toString(), duration, destroyed ? "Oui" : "Non"};
+    }
+
+    // Pseudo raccourci avec un point quand il depasse la limite de la ligne du scoreboard.
+    static String shortName(String name, int max) {
+        return name.length() <= max ? name : name.substring(0, max - 1) + ".";
+    }
+
+    // Secondes passees en file d'attente, -1 si le joueur n'est pas en file.
+    public long queueSeconds(Player player) {
+        UUID id = player.getUniqueId();
+        Long since = queuedAt.get(id);
+        if (since == null || !isQueued(id)) return -1L;
+        return (System.currentTimeMillis() - since) / 1000L;
+    }
+
+    private boolean isQueued(UUID id) {
+        if (soloQueue.contains(id) || rankedQueue.contains(id)) return true;
+        Party party = parties.get(id);
+        return party != null && duoQueue.contains(party);
     }
 
     private Match activeMatchOf(UUID id) {
@@ -259,6 +284,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         } else {
             soloQueue.add(id);
         }
+        queuedAt.put(id, System.currentTimeMillis());
         giveQueueItems(player);
 
         if (ranked) {
@@ -296,6 +322,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         for (UUID id : party.members()) {
             Player member = Bukkit.getPlayer(id);
             if (member == null) continue;
+            queuedAt.put(id, System.currentTimeMillis());
             giveQueueItems(member);
             member.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
                     + ChatColor.YELLOW + "Groupe 2v2 : recherche d'un adversaire...");
@@ -312,6 +339,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             return;
         }
         UUID id = player.getUniqueId();
+        queuedAt.remove(id);
         boolean queued = soloQueue.remove(id);
         if (rankedQueue.remove(id)) queued = true;
         rankedSince.remove(id);
@@ -339,6 +367,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         duoQueue.remove(party);
         for (UUID id : party.members()) {
             parties.remove(id);
+            queuedAt.remove(id);
             if (id.equals(except)) continue;
             Player member = Bukkit.getPlayer(id);
             if (member == null || activeMatchOf(id) != null) continue;
@@ -565,6 +594,7 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private void addToMatch(Match match, UUID id, String team) {
         if (Bukkit.getPlayer(id) == null) return;
+        queuedAt.remove(id);
         match.teams.put(id, team);
         match.players.add(id);
         match.alive.add(id);
@@ -1266,6 +1296,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         soloQueue.remove(id);
         rankedQueue.remove(id);
         rankedSince.remove(id);
+        queuedAt.remove(id);
         Party party = parties.get(id);
         if (party != null) {
             dissolveParty(party, id, ChatColor.RED + player.getName() + " a quitte ton groupe.");
@@ -1337,6 +1368,9 @@ public class BedFightManager implements Listener, CommandExecutor {
                     if (player == null) continue;
                     plugin.setMatchColor(player, null, null);
                     if (player.isDead()) continue;
+                    // Fin de match : les deux joueurs sont soignes.
+                    player.setHealth(20.0);
+                    player.setFoodLevel(20);
                     player.getInventory().clear();
                     player.getInventory().setArmorContents(null);
                     if (lobby != null) player.teleport(lobby);
