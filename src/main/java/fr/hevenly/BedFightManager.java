@@ -121,7 +121,8 @@ public class BedFightManager implements Listener, CommandExecutor {
 
         // Plusieurs adversaires : pseudos plus courts pour tenir sur la ligne.
         List<UUID> opponents = membersOf(match, enemy);
-        int limit = opponents.size() > 1 ? 7 : 14;
+        // La ligne "Adversaire » nom" tient en 16 caracteres : 10 pour un seul adversaire, 4 chacun pour deux.
+        int limit = opponents.size() > 1 ? 4 : 10;
         StringBuilder names = new StringBuilder();
         for (UUID id : opponents) {
             Player opponent = Bukkit.getPlayer(id);
