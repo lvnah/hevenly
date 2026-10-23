@@ -34,6 +34,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
@@ -56,7 +57,11 @@ public class BedFightManager implements Listener, CommandExecutor {
     // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
-    private static final int ISLAND_RADIUS = 4;
+    private static final int ISLAND_RADIUS = 15;
+    // Commandes refusees en match (en plus de toutes celles qui commencent par //, WorldEdit).
+    private static final Set<String> MATCH_BLOCKED_COMMANDS = new HashSet<String>(Arrays.asList(
+            "kill", "spawn", "wand", "we", "worldedit", "sel", "pos1", "pos2", "hpos1", "hpos2",
+            "toggleeditwand", "navwand", "brush", "tool"));
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
     private static final String ARENA_PREFIX = "bedfight.arenas.";
 
@@ -463,13 +468,15 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     // Laine autour du spawn de l'equipe : couleur du premier joueur de l'equipe, si elle a choisi une couleur.
     // Les blocs d'origine sont restaures a la fin du match.
+    // Sans couleur choisie, la couleur de l'equipe (rouge ou bleu) est appliquee.
     private void recolorIsland(Match match, String team) {
         List<UUID> members = membersOf(match, team);
         if (members.isEmpty()) return;
         Player player = Bukkit.getPlayer(members.get(0));
         PlayerColor chosen = player == null ? null : plugin.getColorChoice(player);
+        DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.BLUE);
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
-        if (chosen == null || spawn == null) return;
+        if (spawn == null) return;
 
         World world = spawn.getWorld();
         int cx = spawn.getBlockX();
@@ -479,11 +486,28 @@ public class BedFightManager implements Listener, CommandExecutor {
             for (int y = cy - 2; y <= cy + 2; y++) {
                 for (int z = cz - ISLAND_RADIUS; z <= cz + ISLAND_RADIUS; z++) {
                     Block block = world.getBlockAt(x, y, z);
-                    if (block.getType() != Material.WOOL || block.getData() == chosen.dye.getWoolData()) continue;
-                    match.rememberOriginal(new BlockKey(world.getName(), x, y, z), Material.WOOL, block.getData());
-                    block.setData(chosen.dye.getWoolData(), false);
+                    Material type = block.getType();
+                    if (type != Material.WOOL && type != Material.STAINED_GLASS && type != Material.STAINED_CLAY) continue;
+                    if (block.getData() == dye.getWoolData()) continue;
+                    BlockKey key = new BlockKey(world.getName(), x, y, z);
+                    // Un bloc deja recolore par l'autre equipe reste tel quel.
+                    if (match.changed.containsKey(key)) continue;
+                    match.rememberOriginal(key, type, block.getData());
+                    block.setData(dye.getWoolData(), false);
                 }
             }
+        }
+    }
+
+    // En match : pas de /kill, /spawn ni de commandes WorldEdit, meme pour les ops.
+    @EventHandler
+    public void onMatchCommand(PlayerCommandPreprocessEvent event) {
+        Player player = event.getPlayer();
+        if (activeMatchOf(player.getUniqueId()) == null) return;
+        String label = event.getMessage().split(" ")[0].substring(1).toLowerCase(Locale.ROOT);
+        if (label.startsWith("/") || MATCH_BLOCKED_COMMANDS.contains(label)) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Cette commande est indisponible en partie.");
         }
     }
 
