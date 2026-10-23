@@ -1167,8 +1167,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
 
         if (bedFightManager.isInMatch((Player) event.getWhoClicked())) {
+            // Armure = slots 36 a 39 de l'inventaire joueur.
+            int topSize = event.getView().getTopInventory().getSize();
             for (int rawSlot : event.getRawSlots()) {
-                if (event.getView().getSlotType(rawSlot) == SlotType.ARMOR) {
+                if (rawSlot < topSize) continue;
+                int slot = event.getView().convertSlot(rawSlot);
+                if (slot >= 36 && slot <= 39) {
                     event.setCancelled(true);
                     return;
                 }
