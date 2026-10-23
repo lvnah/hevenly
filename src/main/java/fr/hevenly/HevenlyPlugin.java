@@ -81,9 +81,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String SIDEBAR_SEPARATOR = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "------------";
     // Ops ayant active /build : seuls eux peuvent casser et poser hors match.
     private final Set<UUID> buildMode = new HashSet<UUID>();
-    // Pseudos en minuscules -> true si la boussole et le name tag sont inverses.
-    private final Map<String, Boolean> swappedLayout =
-            new ConcurrentHashMap<String, Boolean>();
+    // Pseudos en minuscules -> disposition du kit BedFight (0 a KIT_LAYOUT_COUNT - 1).
+    private final Map<String, Integer> kitLayouts =
+            new ConcurrentHashMap<String, Integer>();
+    // Pseudos en minuscules -> couleur d'equipe pendant un match (pas de grade au-dessus de la tete).
+    private final Map<String, ChatColor> matchColors =
+            new ConcurrentHashMap<String, ChatColor>();
+    static final int KIT_LAYOUT_COUNT = 3;
+    static final String PREFIX = ChatColor.GRAY + "[" + ChatColor.DARK_RED + "Hevenly"
+            + ChatColor.GRAY + "] " + ChatColor.WHITE;
     private BedFightManager bedFightManager;
 
     @Override
@@ -200,8 +206,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             saveConfig();
 
-            player.sendMessage(ChatColor.GREEN
-                    + "Le spawn a ete defini avec succes !");
+            player.sendMessage(PREFIX + "Le spawn a ete defini avec succes !");
             return true;
         }
 
@@ -221,8 +226,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             player.teleport(spawn);
-            player.sendMessage(ChatColor.GREEN
-                    + "Tu as ete teleporte au spawn !");
+            player.sendMessage(PREFIX + "Tu as ete teleporte au spawn !");
             return true;
         }
 
@@ -264,7 +268,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             String coloredRank = getRankColor(newRank)
                     + newRank.toUpperCase(Locale.ROOT);
 
-            sender.sendMessage(ChatColor.GREEN
+            sender.sendMessage(PREFIX
                     + "Le grade de " + target.getName()
                     + " est maintenant " + coloredRank + ChatColor.GREEN + ".");
 
@@ -295,7 +299,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             for (Player online : Bukkit.getOnlinePlayers()) {
                 clearChat(online);
             }
-            Bukkit.broadcastMessage(ChatColor.GRAY + "Le chat a ete efface par "
+            Bukkit.broadcastMessage(PREFIX + "Le chat a ete efface par "
                     + player.getName() + ChatColor.GRAY + ".");
             return true;
         }
@@ -324,10 +328,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             UUID id = player.getUniqueId();
             if (buildMode.remove(id)) {
-                player.sendMessage(ChatColor.YELLOW + "Mode construction desactive.");
+                player.sendMessage(PREFIX + "Mode construction desactive.");
             } else {
                 buildMode.add(id);
-                player.sendMessage(ChatColor.GREEN + "Mode construction active : tu peux casser et poser hors match.");
+                player.sendMessage(PREFIX + "Mode construction active : tu peux casser et poser hors match.");
             }
             return true;
         }
@@ -354,7 +358,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     private void sendHelp(Player player) {
         player.sendMessage(STRIKE_LINE);
-        player.sendMessage(ChatColor.DARK_RED + "Hevenly " + ChatColor.GRAY + "» Commandes");
+        player.sendMessage(PREFIX + "Liste des commandes :");
         player.sendMessage(ChatColor.YELLOW + "/spawn " + ChatColor.GRAY + "- Retour au lobby");
         player.sendMessage(ChatColor.YELLOW + "/invite <pseudo> " + ChatColor.GRAY + "- Inviter un joueur en 2v2 BedFight");
         player.sendMessage(ChatColor.YELLOW + "/invite accept " + ChatColor.GRAY + "- Accepter une invitation 2v2");
@@ -448,6 +452,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     // Format demandé : §7[<couleur du grade>GRADE§7]
     private String getRankPrefix(String rank) {
+        if ("default".equalsIgnoreCase(rank)) return "";
         return ChatColor.GRAY + "[" + getRankColor(rank)
                 + getRankLabel(rank) + ChatColor.GRAY + "] ";
     }
@@ -519,14 +524,19 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         // Prefixe [RANK] puis un espace ; le pseudo prend la couleur du grade.
         // En 1.8, le prefixe d'une equipe est limite a 16 caracteres (codes couleur inclus).
         String teamPrefix;
-        if (nametagEnabled.getOrDefault(getPlayerKey(target), true)) {
+        ChatColor matchColor = matchColors.get(getPlayerKey(target));
+        if (matchColor != null) {
+            // En match : pas de grade, le pseudo a la couleur de l'equipe.
+            teamPrefix = matchColor.toString();
+        } else if (!nametagEnabled.getOrDefault(getPlayerKey(target), true)
+                || "default".equalsIgnoreCase(rank)) {
+            // Grade default : pas de prefixe, pseudo blanc.
+            teamPrefix = getRankColor(rank).toString();
+        } else {
             String label = getRankLabel(rank);
-            if ("default".equalsIgnoreCase(rank)) label = "DEF";
             if ("premium".equalsIgnoreCase(rank)) label = "PREM";
             teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label
                     + ChatColor.GRAY + "] " + getRankColor(rank);
-        } else {
-            teamPrefix = getRankColor(rank).toString();
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
         team.setPrefix(teamPrefix);
@@ -764,27 +774,27 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     void giveSpecialItems(Player player) {
         PlayerInventory inventory = player.getInventory();
 
-        // Efface les deux emplacements reserves avant de placer les objets selon la disposition.
-        inventory.setItem(0, null);
-        inventory.setItem(8, null);
-
-        inventory.setItem(getCompassSlot(player), createGameItem());
-        inventory.setItem(getNametagSlot(player), createConfigItem());
+        // Boussole en slot 1, name tag en slot 9.
+        inventory.setItem(0, createGameItem());
+        inventory.setItem(8, createConfigItem());
 
         player.updateInventory();
     }
 
-    // Par defaut : boussole en slot 1 (index 0), name tag en slot 9 (index 8).
-    private int getCompassSlot(Player player) {
-        return isSwapped(player) ? 8 : 0;
+    // Disposition du kit BedFight choisie dans le menu Config.
+    int getKitLayout(Player player) {
+        return kitLayouts.getOrDefault(getPlayerKey(player), 0);
     }
 
-    private int getNametagSlot(Player player) {
-        return isSwapped(player) ? 0 : 8;
-    }
-
-    private boolean isSwapped(Player player) {
-        return swappedLayout.getOrDefault(getPlayerKey(player), false);
+    // Pendant un match, le pseudo prend la couleur de l'equipe (null = remettre le grade).
+    void setMatchColor(Player player, ChatColor color) {
+        String key = getPlayerKey(player);
+        if (color == null) {
+            matchColors.remove(key);
+        } else {
+            matchColors.put(key, color);
+        }
+        refreshAllBoards();
     }
 
     // --------------------------------------------------
@@ -829,12 +839,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                         + (enabled ? "ACTIVE" : "DESACTIVE"),
                 ChatColor.GRAY + "Affiche le grade au-dessus de la tete et dans le TAB.",
                 ChatColor.YELLOW + "Clique pour changer"));
-        boolean swapped = isSwapped(player);
         inventory.setItem(15, createGuiItem(Material.CHEST,
-                ChatColor.AQUA + "Disposition de l'inventaire",
-                ChatColor.GRAY + "Boussole : " + (swapped ? "slot 9" : "slot 1"),
-                ChatColor.GRAY + "Name tag : " + (swapped ? "slot 1" : "slot 9"),
-                ChatColor.YELLOW + "Clique pour inverser"));
+                ChatColor.AQUA + "Disposition du kit BedFight",
+                ChatColor.GRAY + "Disposition " + (getKitLayout(player) + 1) + " / " + KIT_LAYOUT_COUNT,
+                ChatColor.GRAY + "Epee, laine, cisaille, hache : positions du match",
+                ChatColor.YELLOW + "Clique pour changer"));
         inventory.setItem(22, createGuiItem(Material.ARROW,
                 ChatColor.GRAY + "Fermer", ChatColor.DARK_GRAY + "Retour au jeu"));
         player.openInventory(inventory);
@@ -876,17 +885,17 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     private void loadNametagSettings() {
         nametagEnabled.clear();
-        swappedLayout.clear();
+        kitLayouts.clear();
         if (getConfig().isConfigurationSection("nametag.enabled")) {
             for (String name : getConfig().getConfigurationSection("nametag.enabled").getKeys(false)) {
                 nametagEnabled.put(name.toLowerCase(Locale.ROOT),
                         getConfig().getBoolean("nametag.enabled." + name, true));
             }
         }
-        if (getConfig().isConfigurationSection("layout.swapped")) {
-            for (String name : getConfig().getConfigurationSection("layout.swapped").getKeys(false)) {
-                swappedLayout.put(name.toLowerCase(Locale.ROOT),
-                        getConfig().getBoolean("layout.swapped." + name, false));
+        if (getConfig().isConfigurationSection("layout.kit")) {
+            for (String name : getConfig().getConfigurationSection("layout.kit").getKeys(false)) {
+                kitLayouts.put(name.toLowerCase(Locale.ROOT),
+                        getConfig().getInt("layout.kit." + name, 0));
             }
         }
     }
@@ -896,9 +905,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         for (Map.Entry<String, Boolean> entry : nametagEnabled.entrySet()) {
             getConfig().set("nametag.enabled." + entry.getKey(), entry.getValue());
         }
-        getConfig().set("layout.swapped", null);
-        for (Map.Entry<String, Boolean> entry : swappedLayout.entrySet()) {
-            getConfig().set("layout.swapped." + entry.getKey(), entry.getValue());
+        getConfig().set("layout.kit", null);
+        for (Map.Entry<String, Integer> entry : kitLayouts.entrySet()) {
+            getConfig().set("layout.kit." + entry.getKey(), entry.getValue());
         }
         saveConfig();
     }
@@ -978,14 +987,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                     player.sendMessage(ChatColor.RED + "Tu ne peux pas changer la disposition pendant une partie.");
                     return;
                 }
-                String key = getPlayerKey(player);
-                boolean swapped = !isSwapped(player);
-                swappedLayout.put(key, swapped);
+                int next = (getKitLayout(player) + 1) % KIT_LAYOUT_COUNT;
+                kitLayouts.put(getPlayerKey(player), next);
                 saveNametagSettings();
-                giveSpecialItems(player);
                 openNametagGui(player);
-                player.sendMessage(ChatColor.GREEN + "Disposition : boussole en slot "
-                        + (swapped ? "9" : "1") + ", name tag en slot " + (swapped ? "1" : "9") + ".");
+                player.sendMessage(PREFIX + "Disposition du kit BedFight : " + (next + 1) + " / " + KIT_LAYOUT_COUNT + ".");
             } else if (event.getRawSlot() == 22) {
                 player.closeInventory();
             }
@@ -1044,6 +1050,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         event.setQuitMessage(null);
         buildMode.remove(event.getPlayer().getUniqueId());
+        matchColors.remove(getPlayerKey(event.getPlayer()));
 
         // Recalcule les equipes restantes après le depart.
         Bukkit.getScheduler().runTask(this, new Runnable() {
