@@ -55,6 +55,11 @@ public class BedFightManager implements Listener, CommandExecutor {
         {1, 0, 3, 2},
         {3, 2, 1, 0}
     };
+
+    // Slots [epee, laine, cisaille, hache] pour une disposition donnee.
+    static int[] kitSlots(int layout) {
+        return KIT_SLOTS[layout % KIT_SLOTS.length];
+    }
     // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
