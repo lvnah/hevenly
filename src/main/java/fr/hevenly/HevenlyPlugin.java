@@ -22,6 +22,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryDragEvent;
@@ -1020,6 +1021,17 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerDeath(PlayerDeathEvent event) {
+        // Pas d'ecran de mort : le joueur reapparait tout de suite.
+        final Player dead = event.getEntity();
+        Bukkit.getScheduler().runTask(this, new Runnable() {
+            @Override
+            public void run() {
+                if (dead.isOnline() && dead.isDead()) {
+                    dead.spigot().respawn();
+                }
+            }
+        });
+
         Iterator<ItemStack> iterator = event.getDrops().iterator();
 
         while (iterator.hasNext()) {
@@ -1073,6 +1085,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         Player player = (Player) event.getWhoClicked();
 
+        // En partie, l'inventaire est libre : les slots reserves ne concernent que le lobby.
+        if (bedFightManager.isInMatch(player)) return;
+
         // Bloquer les clics sur les slots reserves.
         if (event.getClickedInventory() != null
                 && event.getClickedInventory().equals(player.getInventory())) {
@@ -1109,6 +1124,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             return;
         }
 
+        if (bedFightManager.isInMatch((Player) event.getWhoClicked())) return;
+
         String viewTitle = event.getView().getTitle();
         if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)) {
             event.setCancelled(true);
@@ -1138,6 +1155,17 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // --------------------------------------------------
     // INTERDIRE DE JETER LES OBJETS
     // --------------------------------------------------
+
+    // --------------------------------------------------
+    // FAIM : LA NOURRITURE NE DIMINUE JAMAIS
+    // --------------------------------------------------
+
+    @EventHandler
+    public void onFoodChange(FoodLevelChangeEvent event) {
+        if (event.getFoodLevel() < event.getEntity().getFoodLevel()) {
+            event.setCancelled(true);
+        }
+    }
 
     @EventHandler
     public void onPlayerDropItem(PlayerDropItemEvent event) {

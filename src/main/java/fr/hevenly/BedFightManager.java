@@ -16,6 +16,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
@@ -39,7 +40,6 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private static final long INVITE_TIMEOUT_MS = 60000L;
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
-    private static final long RETURN_DELAY_TICKS = 100L;
     private static final String ARENA_PREFIX = "bedfight.arenas.";
 
     // Elo : depart, ecart accepte qui s'elargit avec le temps d'attente.
@@ -909,17 +909,17 @@ public class BedFightManager implements Listener, CommandExecutor {
     public void onBlockBreak(BlockBreakEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (isAdmin(player)) return;
-
         Match match = activeMatchOf(player.getUniqueId());
+        // Hors partie, les ops peuvent construire au lobby ; en partie, les regles s'appliquent a tous.
         if (match == null) {
-            event.setCancelled(true);
+            if (!isAdmin(player)) event.setCancelled(true);
             return;
         }
 
         Block block = event.getBlock();
         String bedTeam = bedTeamForBlock(match.arena, block);
         if (block.getType() == Material.BED_BLOCK) {
+            // Annule l'evenement : le lit disparait tout de suite, sans drop au sol.
             event.setCancelled(true);
             if (bedTeam == null || !Boolean.TRUE.equals(match.bedAlive.get(bedTeam))) return;
             String ownTeam = match.teams.get(player.getUniqueId());
@@ -934,6 +934,12 @@ public class BedFightManager implements Listener, CommandExecutor {
             broadcastMatch(match, ChatColor.GOLD + "Le lit de l'equipe " + teamColor(bedTeam)
                     + bedTeam.toUpperCase(Locale.ROOT) + ChatColor.GOLD + " a ete detruit par "
                     + player.getName() + " !");
+            for (UUID id : match.players) {
+                Player participant = Bukkit.getPlayer(id);
+                if (participant != null) {
+                    participant.playSound(participant.getLocation(), Sound.ENDERDRAGON_GROWL, 1.0f, 1.0f);
+                }
+            }
             return;
         }
 
@@ -947,10 +953,9 @@ public class BedFightManager implements Listener, CommandExecutor {
     public void onBlockPlace(BlockPlaceEvent event) {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
-        if (isAdmin(player)) return;
         Match match = activeMatchOf(player.getUniqueId());
         if (match == null) {
-            event.setCancelled(true);
+            if (!isAdmin(player)) event.setCancelled(true);
             return;
         }
         Material type = event.getBlockPlaced().getType();
@@ -1086,58 +1091,26 @@ public class BedFightManager implements Listener, CommandExecutor {
         if (match.ranked && winner != null) applyRankedResult(match, winner);
 
         final List<UUID> participants = new ArrayList<UUID>(match.players);
-        final List<Party> groups = new ArrayList<Party>(match.parties);
-        final boolean duo = match.duo;
-        final boolean ranked = match.ranked;
         for (UUID id : participants) {
             playerMatch.remove(id);
         }
 
-        Bukkit.getScheduler().runTaskLater(plugin, new Runnable() {
+        // Fin de partie : tout le monde retourne au spawn avec ses objets, sans remise en file.
+        Bukkit.getScheduler().runTask(plugin, new Runnable() {
             @Override
             public void run() {
                 Location lobby = getLobbySpawn();
                 for (UUID id : participants) {
                     Player player = Bukkit.getPlayer(id);
-                    if (player == null) continue;
+                    if (player == null || player.isDead()) continue;
                     player.getInventory().clear();
                     player.getInventory().setArmorContents(null);
                     if (lobby != null) player.teleport(lobby);
                     plugin.giveSpecialItems(player);
                 }
-
-                // 2v2 : les groupes sont remis en file. 1v1 non classee : les joueurs aussi.
-                // 1v1 classee : retour au lobby, le joueur relance une recherche s'il veut.
-                if (duo) {
-                    for (Party party : groups) {
-                        requeueParty(party);
-                    }
-                } else if (!ranked) {
-                    for (UUID id : participants) {
-                        Player player = Bukkit.getPlayer(id);
-                        if (player != null) addToQueue(player, false);
-                    }
-                }
                 tryMatchmaking();
             }
-        }, RETURN_DELAY_TICKS);
-    }
-
-    private void requeueParty(Party party) {
-        // Le groupe a pu etre dissous pendant la partie (depart d'un membre).
-        if (parties.get(party.first) != party || parties.get(party.second) != party) return;
-        for (UUID id : party.members()) {
-            if (Bukkit.getPlayer(id) == null) {
-                dissolveParty(party, null, null);
-                return;
-            }
-        }
-        duoQueue.add(party);
-        for (UUID id : party.members()) {
-            Player member = Bukkit.getPlayer(id);
-            giveQueueItems(member);
-            member.sendMessage(ChatColor.GRAY + "Ton groupe 2v2 est remis dans la file.");
-        }
+        });
     }
 
     private void cleanupPlacedBlocks(Match match) {
