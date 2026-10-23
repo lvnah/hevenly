@@ -77,6 +77,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String BUNGEE_CHANNEL = "BungeeCord";
     private static final String[] STAFF_RANKS = {"owner", "mod", "helper"};
     private static final String QUEUE_LEAVE_NAME = ChatColor.RED + "Quitter la file";
+    private static final String WEBSITE = "hevenly.games";
+    private int shineTick = 0;
     private static final String STRIKE_LINE = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "---------------------------";
     // 16 caracteres (codes couleur compris) en prefixe + 16 en suffixe : limite 1.8 par equipe.
     private static final String SIDEBAR_SEPARATOR = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "------------";
@@ -147,6 +149,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         bedFightManager = new BedFightManager(this);
         bedFightManager.register();
+
+        // Defilement du reflet sur hevenly.games, toutes les 2 ticks.
+        Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
+            @Override
+            public void run() {
+                updateWebsiteLines();
+            }
+        }, 0L, 2L);
 
         // Met a jour le scoreboard une fois par seconde.
         Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
@@ -654,6 +664,32 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return bedFightManager.getElo(player.getUniqueId());
     }
 
+    // Reflet blanc qui glisse sur hevenly.games : mise a jour toutes les 2 ticks pour un defilement fluide.
+    private void updateWebsiteLines() {
+        shineTick++;
+        int shine = shineTick % (WEBSITE.length() + 4) - 2;
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            Scoreboard board = getScoreboard(player);
+            Objective objective = board.getObjective("hevenly");
+            if (objective == null) continue;
+            // 8 lettres en prefixe et 5 en suffixe : chaque lettre compte pour 2 caracteres de couleur.
+            setSidebarTeamLine(board, objective, "hv_sb6", "§6",
+                    websiteText(0, 8, shine), websiteText(8, WEBSITE.length(), shine), 1);
+        }
+    }
+
+    // Lettre au centre du reflet en blanc, voisines en gris, le reste en rouge clair.
+    private String websiteText(int from, int to, int shine) {
+        StringBuilder text = new StringBuilder();
+        for (int i = from; i < to; i++) {
+            int distance = Math.abs(i - shine);
+            ChatColor color = distance == 0 ? ChatColor.WHITE
+                    : distance == 1 ? ChatColor.GRAY : ChatColor.RED;
+            text.append(color).append(WEBSITE.charAt(i));
+        }
+        return text.toString();
+    }
+
     private void updateScoreboards() {
         int onlineCount = Bukkit.getOnlinePlayers().size();
 
@@ -681,7 +717,6 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 4);
             setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: ", "§a" + getPlayerElo(player), 3);
             setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
-            setSidebarTeamLine(board, objective, "hv_sb6", "§6", "§chevenly.games", "", 1);
         }
     }
 
@@ -919,10 +954,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 canChooseColor(getRank(player))
                         ? ChatColor.YELLOW + "Clique pour changer"
                         : ChatColor.RED + "Reserve aux grades Plus, Premium, Mod et Owner"));
+        int[] slots = BedFightManager.kitSlots(getKitLayout(player));
         inventory.setItem(15, createGuiItem(Material.CHEST,
                 ChatColor.AQUA + "Disposition du kit BedFight",
                 ChatColor.GRAY + "Disposition " + (getKitLayout(player) + 1) + " / " + KIT_LAYOUT_COUNT,
-                ChatColor.GRAY + "Epee, laine, cisaille, hache : positions du match",
+                ChatColor.GRAY + "Epee : slot " + (slots[0] + 1),
+                ChatColor.GRAY + "Laine : slot " + (slots[1] + 1),
+                ChatColor.GRAY + "Cisaille : slot " + (slots[2] + 1),
+                ChatColor.GRAY + "Hache : slot " + (slots[3] + 1),
                 ChatColor.YELLOW + "Clique pour changer"));
         inventory.setItem(22, createGuiItem(Material.ARROW,
                 ChatColor.GRAY + "Fermer", ChatColor.DARK_GRAY + "Retour au jeu"));
