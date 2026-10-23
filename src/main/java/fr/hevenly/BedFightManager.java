@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -19,6 +19,7 @@ import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockState;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -39,6 +40,8 @@ import org.bukkit.inventory.meta.LeatherArmorMeta;
 public class BedFightManager implements Listener, CommandExecutor {
 
     private static final long INVITE_TIMEOUT_MS = 60000L;
+    // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
+    private static final int MAX_BUILD_HEIGHT = 10;
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
     private static final String ARENA_PREFIX = "bedfight.arenas.";
 
@@ -283,17 +286,53 @@ public class BedFightManager implements Listener, CommandExecutor {
         return soloQueue.contains(id) || rankedQueue.contains(id);
     }
 
+    // except : membre deja traite par l'appelant (ex. celui qui quitte). Un membre en partie reste sur l'arene.
     private void dissolveParty(Party party, UUID except, String message) {
         duoQueue.remove(party);
         for (UUID id : party.members()) {
             parties.remove(id);
             if (id.equals(except)) continue;
             Player member = Bukkit.getPlayer(id);
-            if (member == null) continue;
+            if (member == null || activeMatchOf(id) != null) continue;
             if (message != null) member.sendMessage(message);
-            // Un membre en pleine partie reste sur l'arene.
-            if (activeMatchOf(id) == null) returnToLobby(member);
+            returnToLobby(member);
         }
+    }
+
+    // /invite disband : seul le createur du groupe peut le dissoudre.
+    private void disbandParty(Player player) {
+        UUID id = player.getUniqueId();
+        Party party = parties.get(id);
+        if (party == null) {
+            player.sendMessage(ChatColor.RED + "Tu n'as pas de groupe.");
+            return;
+        }
+        if (isInMatch(player)) {
+            player.sendMessage(ChatColor.RED + "Impossible de dissoudre le groupe pendant une partie.");
+            return;
+        }
+        if (!party.first.equals(id)) {
+            player.sendMessage(ChatColor.RED + "Seul le createur du groupe peut le dissoudre. Utilise /invite leave.");
+            return;
+        }
+        dissolveParty(party, null, ChatColor.YELLOW + "Le groupe a ete dissous par " + player.getName() + ".");
+    }
+
+    // /invite leave : un membre quitte le groupe.
+    private void leaveParty(Player player) {
+        UUID id = player.getUniqueId();
+        Party party = parties.get(id);
+        if (party == null) {
+            player.sendMessage(ChatColor.RED + "Tu n'as pas de groupe.");
+            return;
+        }
+        if (isInMatch(player)) {
+            player.sendMessage(ChatColor.RED + "Impossible de quitter le groupe pendant une partie.");
+            return;
+        }
+        dissolveParty(party, id, ChatColor.YELLOW + player.getName() + " a quitte le groupe.");
+        player.sendMessage(ChatColor.YELLOW + "Tu as quitte le groupe.");
+        returnToLobby(player);
     }
 
     private void giveQueueItems(Player player) {
@@ -658,6 +697,14 @@ public class BedFightManager implements Listener, CommandExecutor {
             acceptInvite(player);
             return;
         }
+        if (args[0].equalsIgnoreCase("disband")) {
+            disbandParty(player);
+            return;
+        }
+        if (args[0].equalsIgnoreCase("leave")) {
+            leaveParty(player);
+            return;
+        }
 
         Player target = Bukkit.getPlayer(args[0]);
         if (target == null) {
@@ -877,7 +924,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         inv.setItem(2, unbreakable(new ItemStack(Material.SHEARS)));
         inv.setItem(3, unbreakable(new ItemStack(Material.WOOD_AXE)));
         inv.setItem(4, new ItemStack(Material.WOOD_PICKAXE));
-        inv.setItem(5, new ItemStack(Material.WOOD, 32));
         Color color = red ? Color.RED : Color.BLUE;
         inv.setHelmet(leather(Material.LEATHER_HELMET, color));
         inv.setChestplate(leather(Material.LEATHER_CHESTPLATE, color));
@@ -946,7 +992,11 @@ public class BedFightManager implements Listener, CommandExecutor {
         Material type = block.getType();
         if (type != Material.WOOL && type != Material.WOOD && type != Material.LOG && type != Material.LOG_2) {
             event.setCancelled(true);
+            return;
         }
+        // Le bloc casse sera remis en place a la fin de la partie.
+        match.rememberOriginal(new BlockKey(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()),
+                type, block.getData());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -963,8 +1013,18 @@ public class BedFightManager implements Listener, CommandExecutor {
             event.setCancelled(true);
             return;
         }
-        match.placedBlocks.add(new BlockKey(event.getBlockPlaced().getWorld().getName(),
-                event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()));
+        Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + match.teams.get(player.getUniqueId()));
+        if (spawn != null && event.getBlockPlaced().getY() > spawn.getBlockY() + MAX_BUILD_HEIGHT) {
+            event.setCancelled(true);
+            player.sendMessage(ChatColor.RED + "Tu ne peux pas construire plus de "
+                    + MAX_BUILD_HEIGHT + " blocs au-dessus du spawn.");
+            return;
+        }
+
+        BlockState replaced = event.getBlockReplacedState();
+        match.rememberOriginal(new BlockKey(event.getBlockPlaced().getWorld().getName(),
+                event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()),
+                replaced.getType(), replaced.getRawData());
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -1086,7 +1146,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         matches.remove(match);
 
         broadcastMatch(match, ChatColor.GOLD + "Partie terminee ! " + message);
-        cleanupPlacedBlocks(match);
+        restoreChangedBlocks(match);
         restoreBeds(match.arena);
         if (match.ranked && winner != null) applyRankedResult(match, winner);
 
@@ -1113,15 +1173,17 @@ public class BedFightManager implements Listener, CommandExecutor {
         });
     }
 
-    private void cleanupPlacedBlocks(Match match) {
-        for (BlockKey key : match.placedBlocks) {
+    // Remet chaque bloc pose ou casse dans son etat d'origine.
+    private void restoreChangedBlocks(Match match) {
+        for (Map.Entry<BlockKey, BlockSnapshot> entry : match.changed.entrySet()) {
+            BlockKey key = entry.getKey();
             World world = Bukkit.getWorld(key.world);
-            if (world != null) {
-                Block block = world.getBlockAt(key.x, key.y, key.z);
-                block.setType(Material.AIR);
-            }
+            if (world == null) continue;
+            Block block = world.getBlockAt(key.x, key.y, key.z);
+            block.setType(entry.getValue().type);
+            block.setData(entry.getValue().data, false);
         }
-        match.placedBlocks.clear();
+        match.changed.clear();
     }
 
     private void broadcastMatch(Match match, String message) {
@@ -1145,7 +1207,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         private final Set<UUID> alive = new HashSet<UUID>();
         private final List<Party> parties = new ArrayList<Party>();
         private final Map<String, Boolean> bedAlive = new HashMap<String, Boolean>();
-        private final Set<BlockKey> placedBlocks = new LinkedHashSet<BlockKey>();
+        // Etat d'origine de chaque bloc touche pendant la partie, pour remettre la map en place.
+        private final Map<BlockKey, BlockSnapshot> changed = new LinkedHashMap<BlockKey, BlockSnapshot>();
         private boolean finished = false;
 
         private Match(String arena, boolean ranked, boolean duo) {
@@ -1154,6 +1217,12 @@ public class BedFightManager implements Listener, CommandExecutor {
             this.duo = duo;
             bedAlive.put("red", true);
             bedAlive.put("blue", true);
+        }
+
+        private void rememberOriginal(BlockKey key, Material type, byte data) {
+            if (!changed.containsKey(key)) {
+                changed.put(key, new BlockSnapshot(type, data));
+            }
         }
 
         private int countAlive(String team) {
@@ -1188,6 +1257,16 @@ public class BedFightManager implements Listener, CommandExecutor {
         private Invite(UUID from, long time) {
             this.from = from;
             this.time = time;
+        }
+    }
+
+    private static final class BlockSnapshot {
+        private final Material type;
+        private final byte data;
+
+        private BlockSnapshot(Material type, byte data) {
+            this.type = type;
+            this.data = data;
         }
     }
 
