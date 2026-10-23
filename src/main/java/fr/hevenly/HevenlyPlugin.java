@@ -97,7 +97,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private final Map<String, PlayerColor> colorChoices =
             new ConcurrentHashMap<String, PlayerColor>();
     static final int KIT_LAYOUT_COUNT = 3;
-    static final String PREFIX = ChatColor.GRAY + "[" + ChatColor.DARK_RED + "Hevenly"
+    static final String PREFIX = ChatColor.GRAY + "[" + ChatColor.RED + "Hevenly"
             + ChatColor.GRAY + "] " + ChatColor.WHITE;
     private BedFightManager bedFightManager;
 
@@ -732,10 +732,13 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             // En file d'attente : seulement le temps d'attente.
             long waiting = bedFightManager.queueSeconds(player);
             if (waiting >= 0) {
-                for (int i = 1; i <= 7; i++) {
+                // Separateurs gardes ; seules les lignes du lobby et du match disparaissent.
+                for (int i : new int[] {3, 4, 6, 7}) {
                     removeSidebarLine(board, "hv_sb" + i, i == 7 ? "§0" : "§" + i);
                 }
-                setSidebarTeamLine(board, objective, "hv_sbq", "§9", "§fFile d'attente : ", "§a" + waiting + " s", 1);
+                setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
+                setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fFile d'attente : ", "§a" + waiting + "s", 6);
+                setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
                 continue;
             }
             removeSidebarLine(board, "hv_sbq", "§9");
