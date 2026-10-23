@@ -188,7 +188,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
         }, 1L);
 
-        getLogger().info("Hevenly est actiff !");
+        getLogger().info("Hevenly est actifff !");
     }
 
     @Override
