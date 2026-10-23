@@ -82,6 +82,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         getConfig().addDefault("bedfight.servers.unranked", "bedfight-unranked");
         getConfig().addDefault("bedfight.servers.ranked", "bedfight-ranked");
         getConfig().addDefault("bedfight.enabled", false);
+        // false = file d'attente locale (meme serveur), true = connexion BungeeCord.
+        getConfig().addDefault("bedfight.bungee", false);
         getConfig().options().copyDefaults(true);
         saveConfig();
 
@@ -602,7 +604,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                     && CONFIG_NAME.equals(name));
     }
 
-    private void giveSpecialItems(Player player) {
+    void giveSpecialItems(Player player) {
         PlayerInventory inventory = player.getInventory();
 
         // Slot 0 : boussole Game.
@@ -659,6 +661,13 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     private void connectToServer(Player player, String mode) {
+        // Meme serveur : le joueur entre directement dans la file BedFight.
+        if (!getConfig().getBoolean("bedfight.bungee", false)) {
+            player.closeInventory();
+            bedFightManager.joinQueue(player);
+            return;
+        }
+
         String path = "bedfight.servers." + mode;
         String serverName = getConfig().getString(path, "").trim();
         if (serverName.isEmpty()) {
@@ -759,20 +768,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             saveRanks();
         }
 
-        if (bedFightManager != null && bedFightManager.isEnabled()) {
-            // Sur un serveur BedFight, le gestionnaire place les joueurs dans la file.
-            Bukkit.getScheduler().runTaskLater(this, new Runnable() {
-                @Override
-                public void run() {
-                    if (player.isOnline()) {
-                        refreshAllVisuals();
-                        updateScoreboards();
-                    }
-                }
-            }, 2L);
-            return;
-        }
-
+        // Le joueur arrive toujours au lobby ; il rejoint BedFight avec la boussole.
         Location spawn = getSpawn();
 
         if (spawn != null) {
@@ -827,7 +823,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerRespawn(PlayerRespawnEvent event) {
-        if (bedFightManager != null && bedFightManager.isEnabled()) {
+        if (bedFightManager != null && bedFightManager.isInMatch(event.getPlayer())) {
             return; // Le gestionnaire BedFight choisit le spawn de l'equipe.
         }
 
