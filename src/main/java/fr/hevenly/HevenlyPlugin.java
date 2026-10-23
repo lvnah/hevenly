@@ -71,7 +71,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private final Map<String, Boolean> nametagEnabled =
             new ConcurrentHashMap<String, Boolean>();
 
-    private static final String GAME_GUI_TITLE = ChatColor.DARK_RED + "Hevenly » BedFight";
+    private static final String GAME_GUI_TITLE = ChatColor.RED + "Hevenly » BedFight";
     private static final String CONFIG_GUI_TITLE = ChatColor.DARK_GRAY + "Configuration";
     private static final String COLOR_GUI_TITLE = ChatColor.DARK_GRAY + "Couleur du pseudo";
     private static final String BUNGEE_CHANNEL = "BungeeCord";
@@ -481,7 +481,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private ChatColor getRankColor(String rank) {
         switch (rank.toLowerCase(Locale.ROOT)) {
             case "owner":
-                return ChatColor.DARK_RED;
+                return ChatColor.RED;
             case "mod":
                 return ChatColor.DARK_PURPLE;
             case "helper":
@@ -673,6 +673,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             Objective objective = board.getObjective("hevenly");
             if (objective == null) continue;
             // 8 lettres en prefixe et 5 en suffixe : chaque lettre compte pour 2 caracteres de couleur.
+            // En file d'attente, la ligne du site n'est pas affichee.
+            if (bedFightManager.queueSeconds(player) >= 0) continue;
             String[] parts = websiteParts(shine);
             setSidebarTeamLine(board, objective, "hv_sb6", "§6", parts[0], parts[1], 1);
         }
@@ -716,16 +718,27 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             if (objective == null) {
                 objective = board.registerNewObjective("hevenly", "dummy");
-                objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
+                objective.setDisplayName(ChatColor.RED + "Hevenly");
                 objective.setDisplaySlot(DisplaySlot.SIDEBAR);
             } else {
                 if (objective.getDisplaySlot() != DisplaySlot.SIDEBAR) {
                     objective.setDisplaySlot(DisplaySlot.SIDEBAR);
                 }
-                if (!objective.getDisplayName().equals(ChatColor.DARK_RED + "Hevenly")) {
-                    objective.setDisplayName(ChatColor.DARK_RED + "Hevenly");
+                if (!objective.getDisplayName().equals(ChatColor.RED + "Hevenly")) {
+                    objective.setDisplayName(ChatColor.RED + "Hevenly");
                 }
             }
+
+            // En file d'attente : seulement le temps d'attente.
+            long waiting = bedFightManager.queueSeconds(player);
+            if (waiting >= 0) {
+                for (int i = 1; i <= 7; i++) {
+                    removeSidebarLine(board, "hv_sb" + i, i == 7 ? "§0" : "§" + i);
+                }
+                setSidebarTeamLine(board, objective, "hv_sbq", "§9", "§fFile d'attente : ", "§a" + waiting + " s", 1);
+                continue;
+            }
+            removeSidebarLine(board, "hv_sbq", "§9");
 
             // En match : adversaire, duree et lit adverse, a la place des infos du lobby.
             String[] match = bedFightManager.matchLines(player);
@@ -975,7 +988,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 ChatColor.AQUA + "BedFight 2v2 Unranked",
                 ChatColor.GRAY + "Partie en equipe avec ton groupe", ChatColor.YELLOW + "Clique pour rejoindre"));
         inventory.setItem(13, createGuiItem(Material.BOOK,
-                ChatColor.DARK_RED + "Hevenly BedFight",
+                ChatColor.RED + "Hevenly BedFight",
                 ChatColor.GRAY + "Choisis ton mode de jeu"));
         player.openInventory(inventory);
     }
