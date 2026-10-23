@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
@@ -58,6 +59,9 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
     private static final int ISLAND_RADIUS = 15;
+    // Hauteur de l'ile sous et au-dessus du spawn.
+    private static final int ISLAND_DOWN = 5;
+    private static final int ISLAND_UP = 6;
     // Commandes refusees en match (en plus de toutes celles qui commencent par //, WorldEdit).
     private static final Set<String> MATCH_BLOCKED_COMMANDS = new HashSet<String>(Arrays.asList(
             "kill", "spawn", "wand", "we", "worldedit", "sel", "pos1", "pos2", "hpos1", "hpos2",
@@ -455,6 +459,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         matches.add(match);
 
         restoreBeds(arena);
+        resolveColors(match);
         for (UUID id : match.players) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) preparePlayer(match, player, match.teams.get(id));
@@ -468,12 +473,33 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     // Laine autour du spawn de l'equipe : couleur du premier joueur de l'equipe, si elle a choisi une couleur.
     // Les blocs d'origine sont restaures a la fin du match.
-    // Sans couleur choisie, la couleur de l'equipe (rouge ou bleu) est appliquee.
+    // Couleur choisie retenue par joueur. Si deux joueurs ont la meme couleur, un seul la garde au hasard ;
+    // l'autre reste sur la couleur de son equipe.
+    private void resolveColors(Match match) {
+        Map<PlayerColor, List<UUID>> byColor = new HashMap<PlayerColor, List<UUID>>();
+        for (UUID id : match.players) {
+            Player player = Bukkit.getPlayer(id);
+            PlayerColor stored = player == null ? null : plugin.getStoredColor(player);
+            if (stored == null) continue;
+            List<UUID> ids = byColor.get(stored);
+            if (ids == null) {
+                ids = new ArrayList<UUID>();
+                byColor.put(stored, ids);
+            }
+            ids.add(id);
+        }
+        Random random = new Random();
+        for (Map.Entry<PlayerColor, List<UUID>> entry : byColor.entrySet()) {
+            List<UUID> ids = entry.getValue();
+            match.colors.put(ids.get(random.nextInt(ids.size())), entry.getKey());
+        }
+    }
+
+    // Sans couleur retenue, la couleur de l'equipe (rouge ou bleu) est appliquee.
     private void recolorIsland(Match match, String team) {
         List<UUID> members = membersOf(match, team);
         if (members.isEmpty()) return;
-        Player player = Bukkit.getPlayer(members.get(0));
-        PlayerColor chosen = player == null ? null : plugin.getColorChoice(player);
+        PlayerColor chosen = match.colors.get(members.get(0));
         DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.BLUE);
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
         if (spawn == null) return;
@@ -483,7 +509,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         int cy = spawn.getBlockY();
         int cz = spawn.getBlockZ();
         for (int x = cx - ISLAND_RADIUS; x <= cx + ISLAND_RADIUS; x++) {
-            for (int y = cy - 2; y <= cy + 2; y++) {
+            for (int y = cy - ISLAND_DOWN; y <= cy + ISLAND_UP; y++) {
                 for (int z = cz - ISLAND_RADIUS; z <= cz + ISLAND_RADIUS; z++) {
                     Block block = world.getBlockAt(x, y, z);
                     Material type = block.getType();
@@ -1006,12 +1032,13 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private void preparePlayer(Match match, Player player, String team) {
         player.setGameMode(GameMode.SURVIVAL);
-        plugin.setMatchColor(player, teamColor(team));
+        PlayerColor chosen = match.colors.get(player.getUniqueId());
+        plugin.setMatchColor(player, teamColor(team), chosen);
         player.setHealth(20.0);
         player.setFoodLevel(20);
         player.setFireTicks(0);
         player.setFallDistance(0);
-        giveMatchKit(player, team);
+        giveMatchKit(player, team, chosen);
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
         if (spawn != null) player.teleport(spawn);
         player.sendMessage(ChatColor.GOLD + "Ton equipe : " + teamColor(team) + team.toUpperCase(Locale.ROOT));
@@ -1020,9 +1047,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     // Kit identique pour tous les BedFight : cuir teinte aux couleurs de l'equipe.
-    private void giveMatchKit(Player player, String team) {
+    private void giveMatchKit(Player player, String team, PlayerColor chosen) {
         boolean red = "red".equals(team);
-        PlayerColor chosen = plugin.getColorChoice(player);
         DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.BLUE);
         Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.BLUE);
         PlayerInventory inv = player.getInventory();
@@ -1197,7 +1223,7 @@ public class BedFightManager implements Listener, CommandExecutor {
                 if (!player.isOnline()) return;
                 Match current = activeMatchOf(id);
                 if (current != null) {
-                    giveMatchKit(player, current.teams.get(id));
+                    giveMatchKit(player, current.teams.get(id), current.colors.get(id));
                 } else {
                     plugin.giveSpecialItems(player);
                 }
@@ -1283,7 +1309,7 @@ public class BedFightManager implements Listener, CommandExecutor {
                 for (UUID id : participants) {
                     Player player = Bukkit.getPlayer(id);
                     if (player == null) continue;
-                    plugin.setMatchColor(player, null);
+                    plugin.setMatchColor(player, null, null);
                     if (player.isDead()) continue;
                     player.getInventory().clear();
                     player.getInventory().setArmorContents(null);
@@ -1331,6 +1357,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         private final Map<String, Boolean> bedAlive = new HashMap<String, Boolean>();
         // Etat d'origine de chaque bloc touche pendant la partie, pour remettre la map en place.
         private final Map<BlockKey, BlockSnapshot> changed = new LinkedHashMap<BlockKey, BlockSnapshot>();
+        // Couleur choisie retenue pour ce match (un joueur absent de cette map prend la couleur de son equipe).
+        private final Map<UUID, PlayerColor> colors = new HashMap<UUID, PlayerColor>();
         private boolean finished = false;
 
         private Match(String arena, boolean ranked, boolean duo) {
