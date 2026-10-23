@@ -737,7 +737,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                     removeSidebarLine(board, "hv_sb" + i, i == 7 ? "§0" : "§" + i);
                 }
                 setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
-                setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fFile d'attente : ", "§a" + waiting + "s", 6);
+                setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fFile d'attente", " §7» §a" + waiting + " sec", 6);
                 setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
                 continue;
             }
@@ -747,10 +747,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             String[] match = bedFightManager.matchLines(player);
             if (match != null) {
                 setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
-                setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fAdversaire : ", "§c" + match[0], 6);
-                setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fDurée : ", "§a" + match[1], 5);
-                setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fLit détruit : ",
-                        "Oui".equals(match[2]) ? "§aOui" : "§cNon", 4);
+                setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fAdversaire ", "§7» §c" + match[0], 6);
+                setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fDurée ", "§7» §a" + match[1], 5);
+                setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fLit détruit ",
+                        "§7» " + ("Oui".equals(match[2]) ? "§aOui" : "§cNon"), 4);
                 setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
                 removeSidebarLine(board, "hv_sb7", "§0");
                 continue;
@@ -758,14 +758,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             String rank = getRank(player).toUpperCase(Locale.ROOT);
             setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
-            setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fEn ligne : ", "§a" + onlineCount, 6);
+            setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fEn ligne ", "§7» §a" + onlineCount, 6);
             // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
-            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 5);
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade ", "§7» " + getRankColor(rank) + rank, 5);
             // Couleur par defaut, ou la couleur choisie et enregistree dans la config.
             PlayerColor stored = getStoredColor(player);
-            setSidebarTeamLine(board, objective, "hv_sb7", "§0", "§fCouleur : ",
-                    stored == null ? "§fDefaut" : stored.chat + stored.label, 4);
-            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo : ", "§a" + getPlayerElo(player), 3);
+            setSidebarTeamLine(board, objective, "hv_sb7", "§0", "§fCouleur ",
+                    "§7» " + (stored == null ? "§fDefaut" : stored.chat + stored.label), 4);
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo ", "§7» §a" + getPlayerElo(player), 3);
             setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
         }
     }
