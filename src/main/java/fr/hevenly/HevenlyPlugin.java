@@ -100,6 +100,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     static final String PREFIX = ChatColor.GRAY + "[" + ChatColor.RED + "Hevenly"
             + ChatColor.GRAY + "] " + ChatColor.WHITE;
     private BedFightManager bedFightManager;
+    private LeaderboardHolo leaderboardHolo;
 
     @Override
     public void onEnable() {
@@ -144,11 +145,24 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (getCommand("build") != null) {
             getCommand("build").setExecutor(this);
         }
+        if (getCommand("lbholo") != null) {
+            getCommand("lbholo").setExecutor(this);
+        }
 
         Bukkit.getPluginManager().registerEvents(this, this);
 
         bedFightManager = new BedFightManager(this);
         bedFightManager.register();
+
+        // Hologramme du top 10 : recree au demarrage, puis rafraichi chaque minute.
+        leaderboardHolo = new LeaderboardHolo(this, bedFightManager);
+        leaderboardHolo.restore();
+        Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
+            @Override
+            public void run() {
+                leaderboardHolo.restore();
+            }
+        }, 1200L, 1200L);
 
         // Defilement du reflet sur hevenly.games, toutes les 2 ticks.
         Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
@@ -328,6 +342,23 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             sendHelp((Player) sender);
+            return true;
+        }
+
+        if (commandName.equals("lbholo")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+
+            Player player = (Player) sender;
+            if (!player.isOp()) {
+                player.sendMessage(ChatColor.RED + "Cette commande est reservee aux op.");
+                return true;
+            }
+
+            leaderboardHolo.place(player.getLocation());
+            player.sendMessage(PREFIX + "Hologramme du top 10 place ici.");
             return true;
         }
 
