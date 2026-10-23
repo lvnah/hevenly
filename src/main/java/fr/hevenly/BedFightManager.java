@@ -109,6 +109,27 @@ public class BedFightManager implements Listener, CommandExecutor {
         return activeMatchOf(player.getUniqueId()) != null;
     }
 
+    // Infos du scoreboard de match : {adversaire, duree mm:ss, lit adverse detruit (Oui/Non)}.
+    // null si le joueur n'est pas en match.
+    public String[] matchLines(Player player) {
+        Match match = activeMatchOf(player.getUniqueId());
+        if (match == null) return null;
+        String team = match.teams.get(player.getUniqueId());
+        String enemy = "red".equals(team) ? "blue" : "red";
+
+        StringBuilder names = new StringBuilder();
+        for (UUID id : membersOf(match, enemy)) {
+            Player opponent = Bukkit.getPlayer(id);
+            if (names.length() > 0) names.append(", ");
+            names.append(opponent == null ? "?" : opponent.getName());
+        }
+
+        long seconds = (System.currentTimeMillis() - match.startedAt) / 1000L;
+        String duration = String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
+        boolean destroyed = !Boolean.TRUE.equals(match.bedAlive.get(enemy));
+        return new String[] {names.length() == 0 ? "?" : names.toString(), duration, destroyed ? "Oui" : "Non"};
+    }
+
     private Match activeMatchOf(UUID id) {
         Match match = playerMatch.get(id);
         if (match == null || match.finished || !match.alive.contains(id)) return null;
@@ -1364,6 +1385,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         private final Map<BlockKey, BlockSnapshot> changed = new LinkedHashMap<BlockKey, BlockSnapshot>();
         // Couleur choisie retenue pour ce match (un joueur absent de cette map prend la couleur de son equipe).
         private final Map<UUID, PlayerColor> colors = new HashMap<UUID, PlayerColor>();
+        private final long startedAt = System.currentTimeMillis();
         private boolean finished = false;
 
         private Match(String arena, boolean ranked, boolean duo) {
