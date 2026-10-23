@@ -59,14 +59,26 @@ class LeaderboardHolo {
         base.getWorld().getChunkAt(base).load();
         clear(base);
         List<String> lines = lines();
+        // Le titre est en haut ; le point de pose est le bas de l'hologramme.
         for (int i = 0; i < lines.size(); i++) {
-            Location at = base.clone().subtract(0, i * LINE_SPACING, 0);
+            Location at = base.clone().add(0, (lines.size() - 1 - i) * LINE_SPACING, 0);
             ArmorStand stand = (ArmorStand) base.getWorld().spawnEntity(at, EntityType.ARMOR_STAND);
             stand.setVisible(false);
             stand.setBasePlate(false);
             stand.setCustomNameVisible(true);
             stand.setCustomName(lines.get(i));
+            disableGravity(stand);
             stand.setMetadata(META, new FixedMetadataValue(plugin, true));
+        }
+    }
+
+    // Sans gravite, l'armor stand ne tombe pas. Appel par reflexion : la methode n'est pas
+    // garantie dans toutes les versions de l'API 1.8 ; sans elle, on garde le comportement normal.
+    private void disableGravity(ArmorStand stand) {
+        try {
+            stand.getClass().getMethod("setGravity", boolean.class).invoke(stand, false);
+        } catch (ReflectiveOperationException ignored) {
+            // Methode absente : l'hologramme reste soumis a la gravite.
         }
     }
 
