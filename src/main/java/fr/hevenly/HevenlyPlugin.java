@@ -67,6 +67,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String CONFIG_GUI_TITLE = ChatColor.DARK_GRAY + "Configuration";
     private static final String BUNGEE_CHANNEL = "BungeeCord";
     private static final String[] STAFF_RANKS = {"owner", "mod", "helper"};
+    private static final String QUEUE_LEAVE_NAME = ChatColor.RED + "Quitter la file";
+    private static final String WEBSITE = "hevenly.games";
+    // Couleurs qui defilent sur hevenly.games dans le scoreboard.
+    private static final ChatColor[] WAVE_COLORS = {
+        ChatColor.RED, ChatColor.GOLD, ChatColor.YELLOW, ChatColor.GREEN,
+        ChatColor.AQUA, ChatColor.BLUE, ChatColor.LIGHT_PURPLE
+    };
+    private int sidebarTick = 0;
     private static final String STRIKE_LINE = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "---------------------------";
     // 16 caracteres (codes couleur compris) en prefixe + 16 en suffixe : limite 1.8 par equipe.
     private static final String SIDEBAR_SEPARATOR = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "------------";
@@ -323,9 +331,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         player.sendMessage(ChatColor.YELLOW + "/invite <pseudo> " + ChatColor.GRAY + "- Inviter un joueur en 2v2 BedFight");
         player.sendMessage(ChatColor.YELLOW + "/invite accept " + ChatColor.GRAY + "- Accepter une invitation 2v2");
         player.sendMessage(ChatColor.YELLOW + "/bfleave " + ChatColor.GRAY + "- Quitter la file BedFight");
+        player.sendMessage(ChatColor.YELLOW + "/elo [pseudo] " + ChatColor.GRAY + "- Voir ton elo classe");
         player.sendMessage(ChatColor.YELLOW + "/help " + ChatColor.GRAY + "- Afficher cette aide");
         if (isStaff(getRank(player))) {
             player.sendMessage(ChatColor.YELLOW + "/clearchat " + ChatColor.GRAY + "- Vider le chat");
+        }
+        if (isArenaStaff(player)) {
+            player.sendMessage(ChatColor.YELLOW + "/bfarenas " + ChatColor.GRAY + "- Voir les arenes");
+            player.sendMessage(ChatColor.YELLOW + "/bfarena <nom> " + ChatColor.GRAY + "- Aller dans une arene");
         }
         if (player.hasPermission("hevenly.setrank")) {
             player.sendMessage(ChatColor.YELLOW + "/setrank <joueur> <grade> " + ChatColor.GRAY + "- Changer un grade");
@@ -579,11 +592,20 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     private int getPlayerElo(Player player) {
-        return getConfig().getInt("ranked.elo."
-                + player.getName().toLowerCase(Locale.ROOT), 1000);
+        return bedFightManager.getElo(player.getUniqueId());
+    }
+
+    // Une lettre change de couleur a chaque tick : le texte semble defiler.
+    private String animatedWebsite(int from, int to) {
+        StringBuilder text = new StringBuilder();
+        for (int i = from; i < to; i++) {
+            text.append(WAVE_COLORS[(i + sidebarTick) % WAVE_COLORS.length]).append(WEBSITE.charAt(i));
+        }
+        return text.toString();
     }
 
     private void updateScoreboards() {
+        sidebarTick++;
         int onlineCount = Bukkit.getOnlinePlayers().size();
 
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -610,7 +632,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 4);
             setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: ", "§a" + getPlayerElo(player), 3);
             setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
-            setSidebarTeamLine(board, objective, "hv_sb6", "§6", "§chevenly.games", "", 1);
+            // 8 lettres en prefixe et 5 en suffixe : chaque lettre compte pour 2 caracteres de couleur.
+            setSidebarTeamLine(board, objective, "hv_sb6", "§6",
+                    animatedWebsite(0, 8), animatedWebsite(8, WEBSITE.length()), 1);
         }
     }
 
@@ -683,6 +707,22 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return item;
     }
 
+    // Rose rouge (351:1) donnee en file d'attente pour la quitter.
+    ItemStack createQueueLeaveItem() {
+        ItemStack item = new ItemStack(Material.INK_SACK, 1, (short) 1);
+        ItemMeta meta = item.getItemMeta();
+
+        meta.setDisplayName(QUEUE_LEAVE_NAME);
+        item.setItemMeta(meta);
+
+        return item;
+    }
+
+    boolean isArenaStaff(Player player) {
+        String rank = getRank(player);
+        return "owner".equalsIgnoreCase(rank) || "mod".equalsIgnoreCase(rank);
+    }
+
     private boolean isProtectedItem(ItemStack item) {
         if (item == null || item.getType() == Material.AIR
                 || !item.hasItemMeta()) {
@@ -698,7 +738,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return (item.getType() == Material.COMPASS
                     && GAME_NAME.equals(name))
                 || (item.getType() == Material.NAME_TAG
-                    && CONFIG_NAME.equals(name));
+                    && CONFIG_NAME.equals(name))
+                || (item.getType() == Material.INK_SACK
+                    && QUEUE_LEAVE_NAME.equals(name));
     }
 
     void giveSpecialItems(Player player) {
@@ -786,6 +828,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             player.closeInventory();
             if ("duo".equals(mode)) {
                 bedFightManager.joinDuoQueue(player);
+            } else if ("ranked".equals(mode)) {
+                bedFightManager.joinRankedQueue(player);
             } else {
                 bedFightManager.joinQueue(player);
             }
@@ -850,7 +894,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         String name = item.getItemMeta().getDisplayName();
         boolean isGame = item.getType() == Material.COMPASS && GAME_NAME.equals(name);
         boolean isConfig = item.getType() == Material.NAME_TAG && CONFIG_NAME.equals(name);
-        if (!isGame && !isConfig) return;
+        boolean isLeave = item.getType() == Material.INK_SACK && QUEUE_LEAVE_NAME.equals(name);
+        if (!isGame && !isConfig && !isLeave) return;
 
         event.setCancelled(true);
         event.setUseItemInHand(Event.Result.DENY);
@@ -862,6 +907,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         if (isGame) {
             openGameGui(event.getPlayer());
+        } else if (isLeave) {
+            bedFightManager.leaveQueue(event.getPlayer());
         } else {
             openNametagGui(event.getPlayer());
         }

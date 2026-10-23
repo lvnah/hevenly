@@ -38,30 +38,35 @@ import org.bukkit.inventory.meta.LeatherArmorMeta;
 public class BedFightManager implements Listener, CommandExecutor {
 
     private static final long INVITE_TIMEOUT_MS = 60000L;
+    private static final long MATCHMAKING_PERIOD_TICKS = 100L;
+    private static final long RETURN_DELAY_TICKS = 100L;
+    private static final String ARENA_PREFIX = "bedfight.arenas.";
+
+    // Elo : depart, ecart accepte qui s'elargit avec le temps d'attente.
+    private static final int DEFAULT_ELO = 1000;
+    private static final int BASE_ELO_RANGE = 100;
+    private static final int ELO_RANGE_STEP = 50;
+    private static final int ELO_RANGE_MAX = 1000;
+    private static final long ELO_RANGE_STEP_MS = 15000L;
 
     private final HevenlyPlugin plugin;
-    // File 1v1 : un joueur par entree.
+    // File 1v1 non classee : un joueur par entree.
     private final List<UUID> soloQueue = new ArrayList<UUID>();
-    // File 2v2 : un groupe par entree.
+    // File 1v1 classee : joueurs apparies selon leur elo.
+    private final List<UUID> rankedQueue = new ArrayList<UUID>();
+    private final Map<UUID, Long> rankedSince = new HashMap<UUID, Long>();
+    // File 2v2 non classee : un groupe par entree.
     private final List<Party> duoQueue = new ArrayList<Party>();
-    // Groupes 2v2 : chaque joueur d'un groupe pointe vers le meme objet.
+    // Groupes 2v2 : chaque membre pointe vers le meme objet.
     private final Map<UUID, Party> parties = new HashMap<UUID, Party>();
     private final Map<UUID, Invite> invites = new HashMap<UUID, Invite>();
-    // Joueurs encore dans la partie en cours (un joueur elimine est retire).
-    private final Map<UUID, String> teams = new HashMap<UUID, String>();
-    // Participants du match en cours, eliminés compris, pour le retour au lobby.
-    private final List<UUID> matchPlayers = new ArrayList<UUID>();
-    private final List<Party> matchParties = new ArrayList<Party>();
-    private final Set<BlockKey> placedBlocks = new LinkedHashSet<BlockKey>();
-    private final Map<String, Boolean> bedAlive = new HashMap<String, Boolean>();
-    private boolean matchRunning = false;
-    private boolean finishing = false;
-    private boolean duoMatch = false;
+    // Matchs en cours, un par arene.
+    private final List<Match> matches = new ArrayList<Match>();
+    // Participants de chaque match, eliminés compris, jusqu'a la fin de la partie.
+    private final Map<UUID, Match> playerMatch = new HashMap<UUID, Match>();
 
     public BedFightManager(HevenlyPlugin plugin) {
         this.plugin = plugin;
-        bedAlive.put("red", true);
-        bedAlive.put("blue", true);
     }
 
     public boolean isEnabled() {
@@ -69,38 +74,160 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     public boolean isInMatch(Player player) {
-        return matchRunning && teams.containsKey(player.getUniqueId());
+        return activeMatchOf(player.getUniqueId()) != null;
     }
 
-    // Appele par le GUI de la boussole : file 1v1 sur ce serveur.
-    public void joinQueue(Player player) {
+    private Match activeMatchOf(UUID id) {
+        Match match = playerMatch.get(id);
+        if (match == null || match.finished || !match.alive.contains(id)) return null;
+        return match;
+    }
+
+    // --------------------------------------------------
+    // ELO ET STATISTIQUES
+    // --------------------------------------------------
+
+    public int getElo(UUID id) {
+        return plugin.getConfig().getInt("ranked.elo." + id, DEFAULT_ELO);
+    }
+
+    private void setElo(UUID id, int elo) {
+        plugin.getConfig().set("ranked.elo." + id, elo);
+        plugin.saveConfig();
+    }
+
+    private int getStat(UUID id, String stat) {
+        return plugin.getConfig().getInt("ranked.stats." + id + "." + stat, 0);
+    }
+
+    private void addStat(UUID id, String stat) {
+        plugin.getConfig().set("ranked.stats." + id + "." + stat, getStat(id, stat) + 1);
+    }
+
+    // Les K sont plus forts pour les bas elos : ils bougent plus vite.
+    private static int kFactor(int elo) {
+        if (elo < 1000) return 40;
+        if (elo < 2000) return 32;
+        return 24;
+    }
+
+    public static String tierName(int elo) {
+        if (elo < 1000) return "Bronze";
+        if (elo < 1400) return "Argent";
+        if (elo < 1800) return "Or";
+        if (elo < 2200) return "Diamant";
+        return "Maitre";
+    }
+
+    private void applyRankedResult(Match match, String winner) {
+        String loser = "red".equals(winner) ? "blue" : "red";
+        List<UUID> winners = membersOf(match, winner);
+        List<UUID> losers = membersOf(match, loser);
+        // Le classe se joue en 1v1 : sans un joueur de chaque cote, rien a calculer.
+        if (winners.size() != 1 || losers.size() != 1) return;
+
+        UUID w = winners.get(0);
+        UUID l = losers.get(0);
+        int ew = getElo(w);
+        int el = getElo(l);
+
+        double expectedW = 1.0 / (1.0 + Math.pow(10, (el - ew) / 400.0));
+        double surprise = 1.0 - expectedW;
+        int gain = Math.max(1, (int) Math.round(kFactor(ew) * surprise));
+        int loss = Math.max(1, (int) Math.round(kFactor(el) * surprise));
+        int newW = ew + gain;
+        int newL = Math.max(0, el - loss);
+
+        setElo(w, newW);
+        setElo(l, newL);
+        addStat(w, "wins");
+        addStat(l, "losses");
+        plugin.saveConfig();
+
+        notifyElo(w, ew, newW, "+" + gain);
+        notifyElo(l, el, newL, "-" + loss);
+    }
+
+    private void notifyElo(UUID id, int before, int after, String delta) {
+        Player player = Bukkit.getPlayer(id);
+        if (player == null) return;
+        player.sendMessage(ChatColor.GRAY + "ELO : " + before + " -> " + after + " (" + delta + ") "
+                + ChatColor.YELLOW + tierName(after));
+    }
+
+    // --------------------------------------------------
+    // FILES D'ATTENTE
+    // --------------------------------------------------
+
+    // Refuse l'entree dans une file si le joueur est deja occupe.
+    private boolean rejectQueueEntry(Player player) {
+        UUID id = player.getUniqueId();
         if (!isEnabled()) {
             player.sendMessage(ChatColor.RED + "Le BedFight n'est pas active sur ce serveur.");
-            return;
+            return true;
         }
-        UUID id = player.getUniqueId();
-        if (isInMatch(player)) {
+        if (activeMatchOf(id) != null) {
             player.sendMessage(ChatColor.RED + "Tu es deja dans une partie.");
-            return;
+            return true;
         }
+        if (soloQueue.contains(id) || rankedQueue.contains(id)) {
+            player.sendMessage(ChatColor.RED + "Tu es deja dans la file d'attente.");
+            return true;
+        }
+        Party party = parties.get(id);
+        if (party != null && duoQueue.contains(party)) {
+            player.sendMessage(ChatColor.RED + "Ton groupe 2v2 est deja en file : /bfleave pour la quitter.");
+            return true;
+        }
+        return false;
+    }
+
+    // Appele par le GUI : 1v1 non classee.
+    public void joinQueue(Player player) {
+        addToQueue(player, false);
+    }
+
+    // Appele par le GUI : 1v1 classee, appariement par elo.
+    public void joinRankedQueue(Player player) {
+        addToQueue(player, true);
+    }
+
+    private void addToQueue(Player player, boolean ranked) {
+        if (rejectQueueEntry(player)) return;
+        UUID id = player.getUniqueId();
         if (parties.containsKey(id)) {
             player.sendMessage(ChatColor.RED + "Tu es dans un groupe 2v2 : utilise /bfleave pour le quitter.");
             return;
         }
-        if (soloQueue.contains(id)) {
-            player.sendMessage(ChatColor.RED + "Tu es deja dans la file d'attente.");
-            return;
+
+        if (ranked) {
+            rankedQueue.add(id);
+            rankedSince.put(id, System.currentTimeMillis());
+        } else {
+            soloQueue.add(id);
         }
-        addToQueue(player);
+        giveQueueItems(player);
+        Location lobby = getLobbySpawn();
+        if (lobby != null) player.teleport(lobby);
+
+        if (ranked) {
+            player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
+                    + ChatColor.YELLOW + "Recherche d'un adversaire classe (ELO " + getElo(id) + ")...");
+        } else {
+            player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
+                    + ChatColor.YELLOW + "Recherche d'un adversaire...");
+        }
+        warnIfNoArena(player);
+        tryMatchmaking();
     }
 
-    // Appele par le GUI de la boussole : file 2v2 avec le groupe du joueur.
+    // Appele par le GUI : 2v2 non classee avec le groupe du joueur.
     public void joinDuoQueue(Player player) {
         if (!isEnabled()) {
             player.sendMessage(ChatColor.RED + "Le BedFight n'est pas active sur ce serveur.");
             return;
         }
-        if (isInMatch(player)) {
+        if (activeMatchOf(player.getUniqueId()) != null) {
             player.sendMessage(ChatColor.RED + "Tu es deja dans une partie.");
             return;
         }
@@ -113,25 +240,238 @@ public class BedFightManager implements Listener, CommandExecutor {
             player.sendMessage(ChatColor.RED + "Ton groupe est deja dans la file 2v2.");
             return;
         }
+
         duoQueue.add(party);
         for (UUID id : party.members()) {
             Player member = Bukkit.getPlayer(id);
-            if (member != null) {
-                member.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
-                        + ChatColor.YELLOW + "Groupe 2v2 : recherche d'un adversaire...");
+            if (member == null) continue;
+            giveQueueItems(member);
+            member.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
+                    + ChatColor.YELLOW + "Groupe 2v2 : recherche d'un adversaire...");
+        }
+        warnIfNoArena(player);
+        tryMatchmaking();
+    }
+
+    // Appele par /bfleave et par le bouton "Quitter la file".
+    public void leaveQueue(Player player) {
+        if (activeMatchOf(player.getUniqueId()) != null) {
+            player.sendMessage(ChatColor.RED + "Tu ne peux pas quitter une partie en cours avec /bfleave.");
+            player.sendMessage(ChatColor.GRAY + "Deconnecte-toi pour abandonner la partie.");
+            return;
+        }
+        UUID id = player.getUniqueId();
+        boolean queued = soloQueue.remove(id);
+        if (rankedQueue.remove(id)) queued = true;
+        rankedSince.remove(id);
+
+        Party party = parties.get(id);
+        if (party != null) {
+            queued = true;
+            dissolveParty(party, id, ChatColor.YELLOW + player.getName() + " a quitte le groupe.");
+        }
+
+        if (!queued) {
+            player.sendMessage(ChatColor.RED + "Tu n'es pas dans la file d'attente.");
+            return;
+        }
+        player.sendMessage(ChatColor.YELLOW + "Tu as quitte la file BedFight.");
+        returnToLobby(player);
+    }
+
+    private boolean isSearching(UUID id) {
+        return soloQueue.contains(id) || rankedQueue.contains(id);
+    }
+
+    private void dissolveParty(Party party, UUID except, String message) {
+        duoQueue.remove(party);
+        for (UUID id : party.members()) {
+            parties.remove(id);
+            if (id.equals(except)) continue;
+            Player member = Bukkit.getPlayer(id);
+            if (member == null) continue;
+            if (message != null) member.sendMessage(message);
+            // Un membre en pleine partie reste sur l'arene.
+            if (activeMatchOf(id) == null) returnToLobby(member);
+        }
+    }
+
+    private void giveQueueItems(Player player) {
+        PlayerInventory inv = player.getInventory();
+        inv.clear();
+        inv.setArmorContents(null);
+        inv.setItem(8, plugin.createQueueLeaveItem());
+        player.updateInventory();
+    }
+
+    private void returnToLobby(Player player) {
+        plugin.giveSpecialItems(player);
+        Location lobby = getLobbySpawn();
+        if (lobby != null) player.teleport(lobby);
+    }
+
+    private void warnIfNoArena(Player player) {
+        if (!hasAnyArena()) {
+            player.sendMessage(ChatColor.RED + "Aucune arene BedFight n'est configuree. Contacte un administrateur.");
+        }
+    }
+
+    private List<UUID> queuedPlayerIds() {
+        List<UUID> ids = new ArrayList<UUID>(soloQueue);
+        ids.addAll(rankedQueue);
+        for (Party party : duoQueue) {
+            ids.addAll(party.members());
+        }
+        return ids;
+    }
+
+    // --------------------------------------------------
+    // APPARIEMENT ET DEMARRAGE DES PARTIES
+    // --------------------------------------------------
+
+    private void tryMatchmaking() {
+        if (!isEnabled()) return;
+        while (startNextMatch()) {
+            // Tant qu'une arene libre et deux adversaires existent, on lance un match.
+        }
+    }
+
+    // Ordre : 2v2, puis 1v1 classee (elo proche), puis 1v1 non classee.
+    private boolean startNextMatch() {
+        String arena = freeArena();
+        if (arena == null) return false;
+
+        if (duoQueue.size() >= 2) {
+            Party red = duoQueue.remove(0);
+            Party blue = duoQueue.remove(0);
+            startMatch(arena, false, true, red.members(), blue.members(), Arrays.asList(red, blue));
+            return true;
+        }
+
+        UUID[] pair = findRankedPair();
+        if (pair != null) {
+            rankedQueue.remove(pair[0]);
+            rankedQueue.remove(pair[1]);
+            rankedSince.remove(pair[0]);
+            rankedSince.remove(pair[1]);
+            startMatch(arena, true, false, Arrays.asList(pair[0]), Arrays.asList(pair[1]), new ArrayList<Party>());
+            return true;
+        }
+
+        if (soloQueue.size() >= 2) {
+            UUID red = soloQueue.remove(0);
+            UUID blue = soloQueue.remove(0);
+            startMatch(arena, false, false, Arrays.asList(red), Arrays.asList(blue), new ArrayList<Party>());
+            return true;
+        }
+        return false;
+    }
+
+    // L'ecart d'elo accepte est le plus large des deux joueurs, il grandit avec l'attente.
+    private UUID[] findRankedPair() {
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < rankedQueue.size(); i++) {
+            UUID a = rankedQueue.get(i);
+            for (int j = i + 1; j < rankedQueue.size(); j++) {
+                UUID b = rankedQueue.get(j);
+                int allowed = Math.max(eloRange(a, now), eloRange(b, now));
+                if (Math.abs(getElo(a) - getElo(b)) <= allowed) {
+                    return new UUID[] {a, b};
+                }
             }
         }
-        tryStartMatch();
+        return null;
     }
+
+    private int eloRange(UUID id, long now) {
+        Long since = rankedSince.get(id);
+        long waited = since == null ? 0L : now - since;
+        int range = BASE_ELO_RANGE + (int) (waited / ELO_RANGE_STEP_MS) * ELO_RANGE_STEP;
+        return Math.min(ELO_RANGE_MAX, range);
+    }
+
+    private void startMatch(String arena, boolean ranked, boolean duo,
+                            List<UUID> reds, List<UUID> blues, List<Party> groups) {
+        Match match = new Match(arena, ranked, duo);
+        match.parties.addAll(groups);
+        for (UUID id : reds) addToMatch(match, id, "red");
+        for (UUID id : blues) addToMatch(match, id, "blue");
+        matches.add(match);
+
+        restoreBeds(arena);
+        for (UUID id : match.players) {
+            Player player = Bukkit.getPlayer(id);
+            if (player != null) preparePlayer(match, player, match.teams.get(id));
+        }
+        broadcastMatch(match, ChatColor.GOLD + "La partie commence ! " + teamNames(match, "red")
+                + ChatColor.GRAY + " contre " + teamNames(match, "blue") + ChatColor.GOLD + ".");
+        checkMatchEnd(match, "");
+    }
+
+    private void addToMatch(Match match, UUID id, String team) {
+        if (Bukkit.getPlayer(id) == null) return;
+        match.teams.put(id, team);
+        match.players.add(id);
+        match.alive.add(id);
+        playerMatch.put(id, match);
+    }
+
+    private String freeArena() {
+        for (String name : arenaNames()) {
+            if (isArenaComplete(name) && !isArenaBusy(name)) return name;
+        }
+        return null;
+    }
+
+    private boolean isArenaBusy(String name) {
+        for (Match match : matches) {
+            if (!match.finished && match.arena.equals(name)) return true;
+        }
+        return false;
+    }
+
+    private boolean hasAnyArena() {
+        for (String name : arenaNames()) {
+            if (isArenaComplete(name)) return true;
+        }
+        return false;
+    }
+
+    private List<String> arenaNames() {
+        List<String> names = new ArrayList<String>();
+        if (!plugin.getConfig().isConfigurationSection("bedfight.arenas")) return names;
+        names.addAll(plugin.getConfig().getConfigurationSection("bedfight.arenas").getKeys(false));
+        return names;
+    }
+
+    private boolean isArenaComplete(String name) {
+        String base = ARENA_PREFIX + name;
+        return readLocation(base + ".spawns.red") != null
+                && readLocation(base + ".spawns.blue") != null
+                && !getConfiguredBedLocations(name, "red").isEmpty()
+                && !getConfiguredBedLocations(name, "blue").isEmpty();
+    }
+
+    // --------------------------------------------------
+    // COMMANDES
+    // --------------------------------------------------
 
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
-        String[] commands = {"bfsetspawn", "bfsetbed", "bfstart", "bfleave", "invite"};
+        String[] commands = {"bfsetspawn", "bfsetbed", "bfstart", "bfleave", "invite",
+                "bfarenas", "bfarena", "elo"};
         for (String name : commands) {
             if (plugin.getCommand(name) != null) {
                 plugin.getCommand(name).setExecutor(this);
             }
         }
+        // Relance l'appariement : l'elo accepte s'elargit avec le temps d'attente.
+        Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
+            @Override
+            public void run() {
+                tryMatchmaking();
+            }
+        }, MATCHMAKING_PERIOD_TICKS, MATCHMAKING_PERIOD_TICKS);
     }
 
     @Override
@@ -148,16 +488,18 @@ public class BedFightManager implements Listener, CommandExecutor {
                 player.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
                 return true;
             }
-            if (args.length != 1 || (!args[0].equalsIgnoreCase("red") && !args[0].equalsIgnoreCase("blue"))) {
-                player.sendMessage(ChatColor.RED + "Utilisation : /" + name + " <red|blue>");
+            if (args.length != 2 || (!args[0].equalsIgnoreCase("red") && !args[0].equalsIgnoreCase("blue"))
+                    || args[1].isEmpty() || args[1].contains(".")) {
+                player.sendMessage(ChatColor.RED + "Utilisation : /" + name + " <red|blue> <arene>");
                 return true;
             }
 
             String team = args[0].toLowerCase(Locale.ROOT);
+            String arena = args[1].toLowerCase(Locale.ROOT);
             if (name.equals("bfsetspawn")) {
-                saveLocation("bedfight.spawns." + team, player.getLocation());
+                saveLocation(ARENA_PREFIX + arena + ".spawns." + team, player.getLocation());
                 player.sendMessage(ChatColor.GREEN + "Spawn de l'equipe " + teamColor(team) + team.toUpperCase(Locale.ROOT)
-                        + ChatColor.GREEN + " defini.");
+                        + ChatColor.GREEN + " defini pour l'arene " + arena + ".");
             } else {
                 Block target = player.getTargetBlock((HashSet<Byte>) null, 6);
                 if (target == null || target.getType() != Material.BED_BLOCK) {
@@ -165,9 +507,9 @@ public class BedFightManager implements Listener, CommandExecutor {
                             + ChatColor.RED + " a moins de 6 blocs.");
                     return true;
                 }
-                saveBed(team, target);
+                saveBed(arena, team, target);
                 player.sendMessage(ChatColor.GREEN + "Lit de l'equipe " + teamColor(team)
-                        + team.toUpperCase(Locale.ROOT) + ChatColor.GREEN + " enregistre.");
+                        + team.toUpperCase(Locale.ROOT) + ChatColor.GREEN + " enregistre pour l'arene " + arena + ".");
             }
             return true;
         }
@@ -177,20 +519,15 @@ public class BedFightManager implements Listener, CommandExecutor {
                 sender.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
                 return true;
             }
-            if (matchRunning) {
-                sender.sendMessage(ChatColor.RED + "Une partie est deja en cours.");
+            if (!hasAnyArena()) {
+                sender.sendMessage(ChatColor.RED + "Configure au moins une arene avant de lancer une partie.");
                 return true;
             }
-            if (soloQueue.size() < 2 && duoQueue.size() < 2) {
-                sender.sendMessage(ChatColor.RED + "Il faut deux joueurs ou deux groupes dans la file.");
-                return true;
+            if (startNextMatch()) {
+                sender.sendMessage(ChatColor.GREEN + "Partie BedFight demarree.");
+            } else {
+                sender.sendMessage(ChatColor.RED + "Pas assez de joueurs en file ou aucune arene libre.");
             }
-            if (!isArenaConfigured()) {
-                sender.sendMessage(ChatColor.RED + "Configure les deux spawns et les deux lits avant de lancer une partie.");
-                return true;
-            }
-            startNextMatch();
-            sender.sendMessage(ChatColor.GREEN + "Partie BedFight demarree.");
             return true;
         }
 
@@ -212,7 +549,88 @@ public class BedFightManager implements Listener, CommandExecutor {
             return true;
         }
 
+        if (name.equals("bfarenas")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+            Player player = (Player) sender;
+            if (!plugin.isArenaStaff(player)) {
+                player.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
+                return true;
+            }
+            listArenas(player);
+            return true;
+        }
+
+        if (name.equals("bfarena")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+            Player player = (Player) sender;
+            if (!plugin.isArenaStaff(player)) {
+                player.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
+                return true;
+            }
+            if (args.length != 1) {
+                player.sendMessage(ChatColor.RED + "Utilisation : /bfarena <arene>");
+                return true;
+            }
+            Location spawn = readLocation(ARENA_PREFIX + args[0].toLowerCase(Locale.ROOT) + ".spawns.red");
+            if (spawn == null) {
+                player.sendMessage(ChatColor.RED + "Arene introuvable ou sans spawn rouge.");
+                return true;
+            }
+            player.teleport(spawn);
+            player.sendMessage(ChatColor.GREEN + "Tu es teleporte a l'arene " + args[0].toLowerCase(Locale.ROOT) + ".");
+            return true;
+        }
+
+        if (name.equals("elo")) {
+            Player target;
+            if (args.length == 0 && sender instanceof Player) {
+                target = (Player) sender;
+            } else if (args.length == 1) {
+                target = Bukkit.getPlayer(args[0]);
+            } else {
+                sender.sendMessage(ChatColor.RED + "Utilisation : /elo [pseudo]");
+                return true;
+            }
+            if (target == null) {
+                sender.sendMessage(ChatColor.RED + "Ce joueur n'est pas connecte.");
+                return true;
+            }
+            UUID id = target.getUniqueId();
+            int elo = getElo(id);
+            sender.sendMessage(ChatColor.GOLD + "ELO de " + target.getName() + " : " + ChatColor.GREEN + elo
+                    + ChatColor.GRAY + " (" + tierName(elo) + ") - "
+                    + getStat(id, "wins") + " victoires, " + getStat(id, "losses") + " defaites");
+            return true;
+        }
+
         return false;
+    }
+
+    private void listArenas(Player player) {
+        List<String> names = arenaNames();
+        if (names.isEmpty()) {
+            player.sendMessage(ChatColor.RED + "Aucune arene configuree.");
+            return;
+        }
+        player.sendMessage(ChatColor.GOLD + "Arenes BedFight :");
+        for (String name : names) {
+            String status;
+            if (!isArenaComplete(name)) {
+                status = ChatColor.RED + "incomplete";
+            } else if (isArenaBusy(name)) {
+                status = ChatColor.YELLOW + "en jeu";
+            } else {
+                status = ChatColor.GREEN + "libre";
+            }
+            player.sendMessage(ChatColor.GRAY + "- " + ChatColor.AQUA + name + ChatColor.GRAY + " : " + status);
+        }
+        player.sendMessage(ChatColor.GRAY + "Tape /bfarena <nom> pour y aller.");
     }
 
     private boolean isAdmin(Player player) {
@@ -299,71 +717,14 @@ public class BedFightManager implements Listener, CommandExecutor {
         if (parties.containsKey(other.getUniqueId())) {
             return other.getName() + " a deja un groupe.";
         }
-        if (soloQueue.contains(inviter.getUniqueId()) || soloQueue.contains(other.getUniqueId())) {
+        if (isSearching(inviter.getUniqueId()) || isSearching(other.getUniqueId())) {
             return "Quitte la file 1v1 avant de former un groupe.";
         }
         return null;
     }
 
-    private void dissolveParty(Party party, UUID except, String message) {
-        duoQueue.remove(party);
-        for (UUID id : party.members()) {
-            parties.remove(id);
-            if (id.equals(except) || message == null) continue;
-            Player member = Bukkit.getPlayer(id);
-            if (member != null) member.sendMessage(message);
-        }
-    }
-
     // --------------------------------------------------
-    // FILES D'ATTENTE
-    // --------------------------------------------------
-
-    private void leaveQueue(Player player) {
-        if (isInMatch(player)) {
-            player.sendMessage(ChatColor.RED + "Tu ne peux pas quitter une partie en cours avec /bfleave.");
-            player.sendMessage(ChatColor.GRAY + "Deconnecte-toi pour abandonner la partie.");
-            return;
-        }
-        UUID id = player.getUniqueId();
-        boolean queued = soloQueue.remove(id);
-        Party party = parties.get(id);
-        if (party != null) {
-            queued = true;
-            dissolveParty(party, id, ChatColor.YELLOW + player.getName() + " a quitte le groupe.");
-        }
-        if (!queued) {
-            player.sendMessage(ChatColor.RED + "Tu n'es pas dans la file d'attente.");
-            return;
-        }
-        player.sendMessage(ChatColor.YELLOW + "Tu as quitte la file BedFight.");
-        Location lobby = getLobbySpawn();
-        if (lobby != null) player.teleport(lobby);
-    }
-
-    private void addToQueue(Player player) {
-        UUID id = player.getUniqueId();
-        if (teams.containsKey(id) || soloQueue.contains(id)) return;
-        soloQueue.add(id);
-        // Garde la boussole et le name tag : ce sont les seuls moyens de quitter la file.
-        plugin.giveSpecialItems(player);
-        Location lobby = getLobbySpawn();
-        if (lobby != null) player.teleport(lobby);
-        player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
-                + ChatColor.YELLOW + "Recherche d'un adversaire...");
-        tryStartMatch();
-    }
-
-    private List<UUID> queuedPlayerIds() {
-        List<UUID> ids = new ArrayList<UUID>(soloQueue);
-        for (Party party : duoQueue) {
-            ids.addAll(party.members());
-        }
-        return ids;
-    }
-
-    // --------------------------------------------------
-    // ARENE
+    // ARENE : CONFIGURATION ET REGLES
     // --------------------------------------------------
 
     private void saveLocation(String path, Location loc) {
@@ -402,12 +763,13 @@ public class BedFightManager implements Listener, CommandExecutor {
                 (float) plugin.getConfig().getDouble("spawn.pitch"));
     }
 
-    private void saveBed(String team, Block target) {
+    private void saveBed(String arena, String team, Block target) {
         List<Block> parts = getBedParts(target);
-        plugin.getConfig().set("bedfight.beds." + team + ".blocks", null);
+        String base = ARENA_PREFIX + arena + ".beds." + team + ".blocks";
+        plugin.getConfig().set(base, null);
         int i = 0;
         for (Block block : parts) {
-            String path = "bedfight.beds." + team + ".blocks." + i++;
+            String path = base + "." + i++;
             plugin.getConfig().set(path + ".world", block.getWorld().getName());
             plugin.getConfig().set(path + ".x", block.getX());
             plugin.getConfig().set(path + ".y", block.getY());
@@ -437,9 +799,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         return parts;
     }
 
-    private List<Location> getConfiguredBedLocations(String team) {
+    private List<Location> getConfiguredBedLocations(String arena, String team) {
         List<Location> locations = new ArrayList<Location>();
-        String path = "bedfight.beds." + team + ".blocks";
+        String path = ARENA_PREFIX + arena + ".beds." + team + ".blocks";
         if (!plugin.getConfig().isConfigurationSection(path)) return locations;
         for (String key : plugin.getConfig().getConfigurationSection(path).getKeys(false)) {
             String blockPath = path + "." + key;
@@ -455,9 +817,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         return locations;
     }
 
-    private void restoreBeds() {
+    private void restoreBeds(String arena) {
         for (String team : Arrays.asList("red", "blue")) {
-            String path = "bedfight.beds." + team + ".blocks";
+            String path = ARENA_PREFIX + arena + ".beds." + team + ".blocks";
             if (!plugin.getConfig().isConfigurationSection(path)) continue;
             for (String key : plugin.getConfig().getConfigurationSection(path).getKeys(false)) {
                 String blockPath = path + "." + key;
@@ -475,8 +837,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         }
     }
 
-    private boolean isConfiguredBedBlock(Block block, String team) {
-        for (Location loc : getConfiguredBedLocations(team)) {
+    private boolean isConfiguredBedBlock(String arena, Block block, String team) {
+        for (Location loc : getConfiguredBedLocations(arena, team)) {
             if (loc.getWorld().equals(block.getWorld())
                     && loc.getBlockX() == block.getX()
                     && loc.getBlockY() == block.getY()
@@ -485,103 +847,19 @@ public class BedFightManager implements Listener, CommandExecutor {
         return false;
     }
 
-    private String bedTeamForBlock(Block block) {
-        if (isConfiguredBedBlock(block, "red")) return "red";
-        if (isConfiguredBedBlock(block, "blue")) return "blue";
+    private String bedTeamForBlock(String arena, Block block) {
+        if (isConfiguredBedBlock(arena, block, "red")) return "red";
+        if (isConfiguredBedBlock(arena, block, "blue")) return "blue";
         return null;
     }
 
-    private boolean isArenaConfigured() {
-        return readLocation("bedfight.spawns.red") != null
-                && readLocation("bedfight.spawns.blue") != null
-                && !getConfiguredBedLocations("red").isEmpty()
-                && !getConfiguredBedLocations("blue").isEmpty();
-    }
-
-    // --------------------------------------------------
-    // DEMARRAGE DES PARTIES
-    // --------------------------------------------------
-
-    private void tryStartMatch() {
-        if (!isEnabled() || matchRunning || finishing) return;
-        if (soloQueue.size() < 2 && duoQueue.size() < 2) return;
-        if (!isArenaConfigured()) {
-            for (UUID id : queuedPlayerIds()) {
-                Player p = Bukkit.getPlayer(id);
-                if (p != null) p.sendMessage(ChatColor.RED + "La map BedFight n'est pas configuree. Contacte un administrateur.");
-            }
-            return;
-        }
-        startNextMatch();
-    }
-
-    // Une partie 2v2 passe avant une partie 1v1 quand les deux sont possibles.
-    private boolean startNextMatch() {
-        if (matchRunning) return false;
-        if (duoQueue.size() >= 2) {
-            startDuoMatch();
-            return true;
-        }
-        if (soloQueue.size() >= 2) {
-            startSoloMatch();
-            return true;
-        }
-        return false;
-    }
-
-    private void startDuoMatch() {
-        Party red = duoQueue.remove(0);
-        Party blue = duoQueue.remove(0);
-        duoMatch = true;
-        matchParties.clear();
-        matchParties.add(red);
-        matchParties.add(blue);
-        beginMatch(red.members(), blue.members());
-    }
-
-    private void startSoloMatch() {
-        UUID red = soloQueue.remove(0);
-        UUID blue = soloQueue.remove(0);
-        duoMatch = false;
-        matchParties.clear();
-        beginMatch(Arrays.asList(red), Arrays.asList(blue));
-    }
-
-    private void beginMatch(List<UUID> reds, List<UUID> blues) {
-        restoreBeds();
-        placedBlocks.clear();
-        bedAlive.put("red", true);
-        bedAlive.put("blue", true);
-        teams.clear();
-        matchPlayers.clear();
-        matchRunning = true;
-        finishing = false;
-
-        for (UUID id : reds) addToMatch(id, "red");
-        for (UUID id : blues) addToMatch(id, "blue");
-
-        for (UUID id : matchPlayers) {
-            Player player = Bukkit.getPlayer(id);
-            if (player != null) preparePlayer(player, teams.get(id));
-        }
-        broadcastMatch(ChatColor.GOLD + "La partie commence ! " + teamNames("red")
-                + ChatColor.GRAY + " contre " + teamNames("blue") + ChatColor.GOLD + ".");
-        checkMatchEnd("");
-    }
-
-    private void addToMatch(UUID id, String team) {
-        if (Bukkit.getPlayer(id) == null) return;
-        teams.put(id, team);
-        matchPlayers.add(id);
-    }
-
-    private void preparePlayer(Player player, String team) {
+    private void preparePlayer(Match match, Player player, String team) {
         player.setHealth(20.0);
         player.setFoodLevel(20);
         player.setFireTicks(0);
         player.setFallDistance(0);
         giveMatchKit(player, team);
-        Location spawn = readLocation("bedfight.spawns." + team);
+        Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
         if (spawn != null) player.teleport(spawn);
         player.sendMessage(ChatColor.GOLD + "Ton equipe : " + teamColor(team) + team.toUpperCase(Locale.ROOT));
         player.sendMessage(ChatColor.GRAY + "Protege ton lit et detruis celui de ton adversaire !");
@@ -633,26 +911,27 @@ public class BedFightManager implements Listener, CommandExecutor {
         Player player = event.getPlayer();
         if (isAdmin(player)) return;
 
-        if (!isInMatch(player)) {
+        Match match = activeMatchOf(player.getUniqueId());
+        if (match == null) {
             event.setCancelled(true);
             return;
         }
 
         Block block = event.getBlock();
-        String bedTeam = bedTeamForBlock(block);
+        String bedTeam = bedTeamForBlock(match.arena, block);
         if (block.getType() == Material.BED_BLOCK) {
             event.setCancelled(true);
-            if (bedTeam == null || !Boolean.TRUE.equals(bedAlive.get(bedTeam))) return;
-            String ownTeam = teams.get(player.getUniqueId());
+            if (bedTeam == null || !Boolean.TRUE.equals(match.bedAlive.get(bedTeam))) return;
+            String ownTeam = match.teams.get(player.getUniqueId());
             if (bedTeam.equals(ownTeam)) {
                 player.sendMessage(ChatColor.RED + "Tu ne peux pas casser ton propre lit !");
                 return;
             }
-            bedAlive.put(bedTeam, false);
-            for (Location loc : getConfiguredBedLocations(bedTeam)) {
+            match.bedAlive.put(bedTeam, false);
+            for (Location loc : getConfiguredBedLocations(match.arena, bedTeam)) {
                 loc.getBlock().setType(Material.AIR);
             }
-            broadcastMatch(ChatColor.GOLD + "Le lit de l'equipe " + teamColor(bedTeam)
+            broadcastMatch(match, ChatColor.GOLD + "Le lit de l'equipe " + teamColor(bedTeam)
                     + bedTeam.toUpperCase(Locale.ROOT) + ChatColor.GOLD + " a ete detruit par "
                     + player.getName() + " !");
             return;
@@ -669,7 +948,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         if (isAdmin(player)) return;
-        if (!isInMatch(player)) {
+        Match match = activeMatchOf(player.getUniqueId());
+        if (match == null) {
             event.setCancelled(true);
             return;
         }
@@ -678,7 +958,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             event.setCancelled(true);
             return;
         }
-        placedBlocks.add(new BlockKey(event.getBlockPlaced().getWorld().getName(),
+        match.placedBlocks.add(new BlockKey(event.getBlockPlaced().getWorld().getName(),
                 event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()));
     }
 
@@ -686,59 +966,58 @@ public class BedFightManager implements Listener, CommandExecutor {
     public void onDeath(PlayerDeathEvent event) {
         if (!isEnabled()) return;
         Player player = event.getEntity();
-        if (!isInMatch(player)) return;
+        Match match = activeMatchOf(player.getUniqueId());
+        if (match == null) return;
 
         event.getDrops().clear();
         event.setDroppedExp(0);
         event.setDeathMessage(null);
 
-        String team = teams.get(player.getUniqueId());
-        if (Boolean.TRUE.equals(bedAlive.get(team))) {
+        UUID id = player.getUniqueId();
+        String team = match.teams.get(id);
+        if (Boolean.TRUE.equals(match.bedAlive.get(team))) {
             player.sendMessage(ChatColor.GREEN + "Ton lit est encore intact : tu peux revenir dans la partie !");
             return;
         }
 
-        // Lit detruit : le joueur est elimine, sans respawn dans la partie.
-        teams.remove(player.getUniqueId());
+        match.alive.remove(id);
         player.sendMessage(ChatColor.RED + "Ton lit est detruit : tu es elimine !");
-        checkMatchEnd("");
+        checkMatchEnd(match, "");
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onRespawn(PlayerRespawnEvent event) {
         if (!isEnabled()) return;
-        // Hors partie, le respawn au lobby est gere par HevenlyPlugin.
         final Player player = event.getPlayer();
-        String team = teams.get(player.getUniqueId());
-        if (team == null || !matchRunning) return;
+        final UUID id = player.getUniqueId();
+        Match match = playerMatch.get(id);
+        // Hors partie ou elimine : HevenlyPlugin gere le lobby.
+        if (match == null || match.finished || !match.alive.contains(id)) return;
 
-        if (Boolean.TRUE.equals(bedAlive.get(team))) {
-            Location spawn = readLocation("bedfight.spawns." + team);
+        String team = match.teams.get(id);
+        if (Boolean.TRUE.equals(match.bedAlive.get(team))) {
+            Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
             if (spawn != null) event.setRespawnLocation(spawn);
         } else {
             // Le lit a ete detruit pendant la mort : elimination au respawn.
-            teams.remove(player.getUniqueId());
+            match.alive.remove(id);
             Location lobby = getLobbySpawn();
             if (lobby != null) event.setRespawnLocation(lobby);
-            checkMatchEnd("");
+            checkMatchEnd(match, "");
         }
 
         Bukkit.getScheduler().runTaskLater(plugin, new Runnable() {
             @Override
             public void run() {
                 if (!player.isOnline()) return;
-                String currentTeam = teams.get(player.getUniqueId());
-                if (currentTeam != null && matchRunning && Boolean.TRUE.equals(bedAlive.get(currentTeam))) {
-                    prepareRespawnInventory(player, currentTeam);
-                } else if (!isInMatch(player)) {
+                Match current = activeMatchOf(id);
+                if (current != null) {
+                    giveMatchKit(player, current.teams.get(id));
+                } else {
                     plugin.giveSpecialItems(player);
                 }
             }
         }, 2L);
-    }
-
-    private void prepareRespawnInventory(Player player, String team) {
-        giveMatchKit(player, team);
     }
 
     @EventHandler
@@ -748,30 +1027,32 @@ public class BedFightManager implements Listener, CommandExecutor {
         UUID id = player.getUniqueId();
 
         soloQueue.remove(id);
+        rankedQueue.remove(id);
+        rankedSince.remove(id);
         Party party = parties.get(id);
         if (party != null) {
             dissolveParty(party, id, ChatColor.RED + player.getName() + " a quitte ton groupe.");
         }
 
-        if (isInMatch(player)) {
+        Match match = activeMatchOf(id);
+        if (match != null) {
             // Quitter en partie compte comme une elimination.
-            teams.remove(id);
-            checkMatchEnd(" par abandon");
+            match.alive.remove(id);
+            checkMatchEnd(match, " par abandon");
         }
     }
 
-    private int countAlive(String team) {
-        int count = 0;
-        for (String value : teams.values()) {
-            if (team.equals(value)) count++;
+    private List<UUID> membersOf(Match match, String team) {
+        List<UUID> ids = new ArrayList<UUID>();
+        for (UUID id : match.players) {
+            if (team.equals(match.teams.get(id))) ids.add(id);
         }
-        return count;
+        return ids;
     }
 
-    private String teamNames(String team) {
+    private String teamNames(Match match, String team) {
         StringBuilder names = new StringBuilder();
-        for (UUID id : matchPlayers) {
-            if (!team.equals(teams.get(id))) continue;
+        for (UUID id : membersOf(match, team)) {
             Player player = Bukkit.getPlayer(id);
             if (names.length() > 0) names.append(ChatColor.GRAY).append(", ");
             names.append(teamColor(team)).append(player == null ? "?" : player.getName());
@@ -780,64 +1061,66 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     // Fin de partie quand une equipe n'a plus aucun joueur en jeu.
-    private void checkMatchEnd(String reason) {
-        if (!matchRunning || finishing) return;
-        boolean redAlive = countAlive("red") > 0;
-        boolean blueAlive = countAlive("blue") > 0;
+    private void checkMatchEnd(Match match, String reason) {
+        if (match.finished) return;
+        boolean redAlive = match.countAlive("red") > 0;
+        boolean blueAlive = match.countAlive("blue") > 0;
         if (redAlive && blueAlive) return;
         if (!redAlive && !blueAlive) {
-            finishMatch(ChatColor.YELLOW + "La partie est annulee.");
+            finishMatch(match, null, ChatColor.YELLOW + "La partie est annulee.");
             return;
         }
         String winner = redAlive ? "red" : "blue";
-        finishMatch(teamNames(winner) + ChatColor.GREEN + " remporte la partie" + reason + " !");
+        finishMatch(match, winner, teamNames(match, winner) + ChatColor.GREEN
+                + " remporte la partie" + reason + " !");
     }
 
-    private void finishMatch(String message) {
-        if (!matchRunning || finishing) return;
-        finishing = true;
-        matchRunning = false;
-        broadcastMatch(ChatColor.GOLD + "Partie terminee ! " + message);
-        cleanupPlacedBlocks();
-        restoreBeds();
-        final List<UUID> formerPlayers = new ArrayList<UUID>(matchPlayers);
-        final List<Party> formerParties = new ArrayList<Party>(matchParties);
-        final boolean wasDuo = duoMatch;
-        teams.clear();
-        matchPlayers.clear();
-        matchParties.clear();
-        bedAlive.put("red", true);
-        bedAlive.put("blue", true);
+    private void finishMatch(Match match, String winner, String message) {
+        if (match.finished) return;
+        match.finished = true;
+        matches.remove(match);
+
+        broadcastMatch(match, ChatColor.GOLD + "Partie terminee ! " + message);
+        cleanupPlacedBlocks(match);
+        restoreBeds(match.arena);
+        if (match.ranked && winner != null) applyRankedResult(match, winner);
+
+        final List<UUID> participants = new ArrayList<UUID>(match.players);
+        final List<Party> groups = new ArrayList<Party>(match.parties);
+        final boolean duo = match.duo;
+        final boolean ranked = match.ranked;
+        for (UUID id : participants) {
+            playerMatch.remove(id);
+        }
 
         Bukkit.getScheduler().runTaskLater(plugin, new Runnable() {
             @Override
             public void run() {
                 Location lobby = getLobbySpawn();
-                for (UUID id : formerPlayers) {
+                for (UUID id : participants) {
                     Player player = Bukkit.getPlayer(id);
                     if (player == null) continue;
                     player.getInventory().clear();
                     player.getInventory().setArmorContents(null);
                     if (lobby != null) player.teleport(lobby);
-                    if (wasDuo) plugin.giveSpecialItems(player);
+                    plugin.giveSpecialItems(player);
                 }
 
-                // Les joueurs sont remis dans la file de meme type que la partie.
-                if (wasDuo) {
-                    for (Party party : formerParties) {
+                // 2v2 : les groupes sont remis en file. 1v1 non classee : les joueurs aussi.
+                // 1v1 classee : retour au lobby, le joueur relance une recherche s'il veut.
+                if (duo) {
+                    for (Party party : groups) {
                         requeueParty(party);
                     }
-                } else {
-                    for (UUID id : formerPlayers) {
+                } else if (!ranked) {
+                    for (UUID id : participants) {
                         Player player = Bukkit.getPlayer(id);
-                        if (player != null) addToQueue(player);
+                        if (player != null) addToQueue(player, false);
                     }
                 }
-
-                finishing = false;
-                tryStartMatch();
+                tryMatchmaking();
             }
-        }, 100L);
+        }, RETURN_DELAY_TICKS);
     }
 
     private void requeueParty(Party party) {
@@ -851,29 +1134,61 @@ public class BedFightManager implements Listener, CommandExecutor {
         }
         duoQueue.add(party);
         for (UUID id : party.members()) {
-            Bukkit.getPlayer(id).sendMessage(ChatColor.GRAY + "Ton groupe 2v2 est remis dans la file.");
+            Player member = Bukkit.getPlayer(id);
+            giveQueueItems(member);
+            member.sendMessage(ChatColor.GRAY + "Ton groupe 2v2 est remis dans la file.");
         }
     }
 
-    private void cleanupPlacedBlocks() {
-        for (BlockKey key : placedBlocks) {
+    private void cleanupPlacedBlocks(Match match) {
+        for (BlockKey key : match.placedBlocks) {
             World world = Bukkit.getWorld(key.world);
             if (world != null) {
                 Block block = world.getBlockAt(key.x, key.y, key.z);
                 block.setType(Material.AIR);
             }
         }
-        placedBlocks.clear();
+        match.placedBlocks.clear();
     }
 
-    private void broadcastMatch(String message) {
-        for (UUID id : teams.keySet()) {
+    private void broadcastMatch(Match match, String message) {
+        for (UUID id : match.players) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) player.sendMessage(message);
         }
         for (UUID id : queuedPlayerIds()) {
             Player player = Bukkit.getPlayer(id);
             if (player != null) player.sendMessage(message);
+        }
+    }
+
+    // Un match sur une arene. Les joueurs eliminés restent dans players/teams.
+    private static final class Match {
+        private final String arena;
+        private final boolean ranked;
+        private final boolean duo;
+        private final List<UUID> players = new ArrayList<UUID>();
+        private final Map<UUID, String> teams = new HashMap<UUID, String>();
+        private final Set<UUID> alive = new HashSet<UUID>();
+        private final List<Party> parties = new ArrayList<Party>();
+        private final Map<String, Boolean> bedAlive = new HashMap<String, Boolean>();
+        private final Set<BlockKey> placedBlocks = new LinkedHashSet<BlockKey>();
+        private boolean finished = false;
+
+        private Match(String arena, boolean ranked, boolean duo) {
+            this.arena = arena;
+            this.ranked = ranked;
+            this.duo = duo;
+            bedAlive.put("red", true);
+            bedAlive.put("blue", true);
+        }
+
+        private int countAlive(String team) {
+            int count = 0;
+            for (UUID id : alive) {
+                if (team.equals(teams.get(id))) count++;
+            }
+            return count;
         }
     }
 

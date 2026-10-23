@@ -16,13 +16,22 @@ commands:
     usage: /setrank <joueur> <default|plus|premium|helper|mod|owner>
     permission: hevenly.setrank
   bfsetspawn:
-    description: Definit le spawn de l'equipe BedFight rouge ou bleue
-    usage: /bfsetspawn <red|blue>
+    description: Definit le spawn de l'equipe BedFight rouge ou bleue dans une arene
+    usage: /bfsetspawn <red|blue> <arene>
     permission: hevenly.bedfight.admin
   bfsetbed:
-    description: Enregistre le lit de l'equipe rouge ou bleue en regardant le lit
-    usage: /bfsetbed <red|blue>
+    description: Enregistre le lit de l'equipe rouge ou bleue en regardant le lit, dans une arene
+    usage: /bfsetbed <red|blue> <arene>
     permission: hevenly.bedfight.admin
+  bfarenas:
+    description: Liste les arenes BedFight (owner, mod)
+    usage: /bfarenas
+  bfarena:
+    description: Teleporte a une arene BedFight (owner, mod)
+    usage: /bfarena <arene>
+  elo:
+    description: Affiche ton elo classe ou celui d'un joueur
+    usage: /elo [pseudo]
   bfstart:
     description: Demarre une partie avec les deux premiers joueurs en attente
     usage: /bfstart
