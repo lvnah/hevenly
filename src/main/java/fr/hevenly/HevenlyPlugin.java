@@ -8,10 +8,12 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.Locale;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -22,6 +24,10 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Event;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.inventory.InventoryType.SlotType;
+import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -73,6 +79,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String STRIKE_LINE = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "---------------------------";
     // 16 caracteres (codes couleur compris) en prefixe + 16 en suffixe : limite 1.8 par equipe.
     private static final String SIDEBAR_SEPARATOR = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "------------";
+    // Ops ayant active /build : seuls eux peuvent casser et poser hors match.
+    private final Set<UUID> buildMode = new HashSet<UUID>();
     // Pseudos en minuscules -> true si la boussole et le name tag sont inverses.
     private final Map<String, Boolean> swappedLayout =
             new ConcurrentHashMap<String, Boolean>();
@@ -117,6 +125,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
         if (getCommand("help") != null) {
             getCommand("help").setExecutor(this);
+        }
+        if (getCommand("build") != null) {
+            getCommand("build").setExecutor(this);
         }
 
         Bukkit.getPluginManager().registerEvents(this, this);
@@ -296,6 +307,28 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             sendHelp((Player) sender);
+            return true;
+        }
+
+        if (commandName.equals("build")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+
+            Player player = (Player) sender;
+            if (!player.isOp()) {
+                player.sendMessage(ChatColor.RED + "Cette commande est reservee aux op.");
+                return true;
+            }
+
+            UUID id = player.getUniqueId();
+            if (buildMode.remove(id)) {
+                player.sendMessage(ChatColor.YELLOW + "Mode construction desactive.");
+            } else {
+                buildMode.add(id);
+                player.sendMessage(ChatColor.GREEN + "Mode construction active : tu peux casser et poser hors match.");
+            }
             return true;
         }
 
@@ -899,6 +932,20 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         }
     }
 
+    // WorldEdit prend une hache en bois comme outil : en match, seule la hache du kit est utilisable.
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onWorldEditAxe(PlayerInteractEvent event) {
+        ItemStack item = event.getItem();
+        if (item == null || item.getType() != Material.WOOD_AXE) return;
+        if (!bedFightManager.isInMatch(event.getPlayer())) return;
+        if (item.hasItemMeta() && BedFightManager.MATCH_AXE_NAME.equals(item.getItemMeta().getDisplayName())) return;
+
+        event.setCancelled(true);
+        event.setUseItemInHand(Event.Result.DENY);
+        event.setUseInteractedBlock(Event.Result.DENY);
+        event.getPlayer().sendMessage(ChatColor.RED + "Tu ne peux pas utiliser cette hache en partie.");
+    }
+
     @EventHandler
     public void onHevenlyGuiClick(InventoryClickEvent event) {
         if (!(event.getWhoClicked() instanceof Player)) return;
@@ -958,6 +1005,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         clearChat(player);
         sendWelcome(player);
 
+        // Le lobby est toujours en survie.
+        player.setGameMode(GameMode.SURVIVAL);
+
         // Efface ce qui reste d'une partie deconnectee : le lobby donne ses propres objets.
         player.getInventory().clear();
         player.getInventory().setArmorContents(null);
@@ -993,6 +1043,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent event) {
         event.setQuitMessage(null);
+        buildMode.remove(event.getPlayer().getUniqueId());
 
         // Recalcule les equipes restantes après le depart.
         Bukkit.getScheduler().runTask(this, new Runnable() {
@@ -1073,8 +1124,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         Player player = (Player) event.getWhoClicked();
 
-        // En partie, l'inventaire est libre : les slots reserves ne concernent que le lobby.
-        if (bedFightManager.isInMatch(player)) return;
+        // En partie, l'inventaire est libre sauf l'armure en cuir, qui reste equipee.
+        if (bedFightManager.isInMatch(player)) {
+            if (event.getSlotType() == SlotType.ARMOR) event.setCancelled(true);
+            return;
+        }
 
         // Bloquer les clics sur les slots reserves.
         if (event.getClickedInventory() != null
@@ -1112,7 +1166,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             return;
         }
 
-        if (bedFightManager.isInMatch((Player) event.getWhoClicked())) return;
+        if (bedFightManager.isInMatch((Player) event.getWhoClicked())) {
+            for (int rawSlot : event.getRawSlots()) {
+                if (event.getView().getSlotType(rawSlot) == SlotType.ARMOR) {
+                    event.setCancelled(true);
+                    return;
+                }
+            }
+            return;
+        }
 
         String viewTitle = event.getView().getTitle();
         if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)) {
@@ -1147,6 +1209,39 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // --------------------------------------------------
     // FAIM : LA NOURRITURE NE DIMINUE JAMAIS
     // --------------------------------------------------
+
+    // --------------------------------------------------
+    // CONSTRUCTION : HORS MATCH, SEULEMENT AVEC /build POUR LES OP
+    // Les matchs gerent leurs propres regles dans BedFightManager.
+    // --------------------------------------------------
+
+    private boolean canBuildOutsideMatch(Player player) {
+        return player.isOp() && buildMode.contains(player.getUniqueId());
+    }
+
+    @EventHandler
+    public void onBuildBreak(BlockBreakEvent event) {
+        Player player = event.getPlayer();
+        if (bedFightManager.isInMatch(player) || canBuildOutsideMatch(player)) return;
+        event.setCancelled(true);
+        player.sendMessage(ChatColor.RED + "Tu ne peux pas casser ici.");
+    }
+
+    @EventHandler
+    public void onBuildPlace(BlockPlaceEvent event) {
+        Player player = event.getPlayer();
+        if (bedFightManager.isInMatch(player) || canBuildOutsideMatch(player)) return;
+        event.setCancelled(true);
+        player.sendMessage(ChatColor.RED + "Tu ne peux pas poser de bloc ici.");
+    }
+
+    // Creatif interdit : seule la survie est autorisee.
+    @EventHandler
+    public void onGameModeChange(PlayerGameModeChangeEvent event) {
+        if (event.getNewGameMode() == GameMode.CREATIVE) {
+            event.setCancelled(true);
+        }
+    }
 
     // Chute dans le vide : mort instantanee, sans passer par les degats normaux.
     @EventHandler

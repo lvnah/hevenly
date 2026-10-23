@@ -32,6 +32,9 @@ commands:
   elo:
     description: Affiche ton elo classe ou celui d'un joueur
     usage: /elo [pseudo]
+  build:
+    description: Active ou desactive le mode construction hors match (op)
+    usage: /build
   bfstart:
     description: Demarre une partie avec les deux premiers joueurs en attente
     usage: /bfstart

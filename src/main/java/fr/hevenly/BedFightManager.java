@@ -40,6 +40,8 @@ import org.bukkit.inventory.meta.LeatherArmorMeta;
 public class BedFightManager implements Listener, CommandExecutor {
 
     private static final long INVITE_TIMEOUT_MS = 60000L;
+    // Nom de la hache du kit : tout autre bois de hache est refuse en match (outil WorldEdit).
+    static final String MATCH_AXE_NAME = ChatColor.GRAY + "Hache en bois";
     // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
     private static final int MAX_BUILD_HEIGHT = 10;
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
@@ -210,8 +212,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             soloQueue.add(id);
         }
         giveQueueItems(player);
-        Location lobby = getLobbySpawn();
-        if (lobby != null) player.teleport(lobby);
+        teleportToLobby(player);
 
         if (ranked) {
             player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
@@ -345,8 +346,23 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private void returnToLobby(Player player) {
         plugin.giveSpecialItems(player);
-        Location lobby = getLobbySpawn();
-        if (lobby != null) player.teleport(lobby);
+        teleportToLobby(player);
+    }
+
+    // Teleportation au tick suivant : un changement d'inventaire ou une fermeture de GUI
+    // dans le meme tick pouvait annuler le deplacement.
+    private void teleportToLobby(final Player player) {
+        final Location lobby = getLobbySpawn();
+        if (lobby == null) {
+            player.sendMessage(ChatColor.RED + "Le spawn du lobby n'est pas defini (/setspawn).");
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, new Runnable() {
+            @Override
+            public void run() {
+                if (player.isOnline()) player.teleport(lobby);
+            }
+        });
     }
 
     private void warnIfNoArena(Player player) {
@@ -922,7 +938,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         inv.setItem(0, unbreakable(new ItemStack(Material.WOOD_SWORD)));
         inv.setItem(1, new ItemStack(Material.WOOL, 64, (short) 0, (byte) (red ? 14 : 11)));
         inv.setItem(2, unbreakable(new ItemStack(Material.SHEARS)));
-        inv.setItem(3, unbreakable(new ItemStack(Material.WOOD_AXE)));
+        inv.setItem(3, namedUnbreakable(Material.WOOD_AXE, MATCH_AXE_NAME));
         inv.setItem(4, new ItemStack(Material.WOOD_PICKAXE));
         Color color = red ? Color.RED : Color.BLUE;
         inv.setHelmet(leather(Material.LEATHER_HELMET, color));
@@ -934,6 +950,15 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private ItemStack unbreakable(ItemStack item) {
         ItemMeta meta = item.getItemMeta();
+        meta.spigot().setUnbreakable(true);
+        item.setItemMeta(meta);
+        return item;
+    }
+
+    private ItemStack namedUnbreakable(Material material, String name) {
+        ItemStack item = new ItemStack(material);
+        ItemMeta meta = item.getItemMeta();
+        meta.setDisplayName(name);
         meta.spigot().setUnbreakable(true);
         item.setItemMeta(meta);
         return item;
@@ -956,11 +981,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         Match match = activeMatchOf(player.getUniqueId());
-        // Hors partie, les ops peuvent construire au lobby ; en partie, les regles s'appliquent a tous.
-        if (match == null) {
-            if (!isAdmin(player)) event.setCancelled(true);
-            return;
-        }
+        // Hors partie, HevenlyPlugin decide (/build).
+        if (match == null) return;
 
         Block block = event.getBlock();
         String bedTeam = bedTeamForBlock(match.arena, block);
@@ -1004,10 +1026,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         if (!isEnabled()) return;
         Player player = event.getPlayer();
         Match match = activeMatchOf(player.getUniqueId());
-        if (match == null) {
-            if (!isAdmin(player)) event.setCancelled(true);
-            return;
-        }
+        // Hors partie, HevenlyPlugin decide (/build).
+        if (match == null) return;
         Material type = event.getBlockPlaced().getType();
         if (type != Material.WOOL && type != Material.WOOD && type != Material.LOG && type != Material.LOG_2) {
             event.setCancelled(true);
