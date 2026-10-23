@@ -38,6 +38,9 @@ commands:
   build:
     description: Active ou desactive le mode construction hors match (op)
     usage: /build
+  lbholo:
+    description: Place l'hologramme du top 10 ranked a ta position (op)
+    usage: /lbholo
   bfstart:
     description: Demarre une partie avec les deux premiers joueurs en attente
     usage: /bfstart

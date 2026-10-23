@@ -28,6 +28,8 @@ import org.bukkit.block.BlockState;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -135,6 +137,14 @@ public class BedFightManager implements Listener, CommandExecutor {
         // Son propre lit : detruit par l'adversaire ou non.
         boolean destroyed = !Boolean.TRUE.equals(match.bedAlive.get(team));
         return new String[] {names.length() == 0 ? "?" : names.toString(), duration, destroyed ? "Oui" : "Non"};
+    }
+
+    private void removeDroppedBeds(Location center) {
+        for (Entity entity : center.getWorld().getNearbyEntities(center, 3, 3, 3)) {
+            if (entity instanceof Item && ((Item) entity).getItemStack().getType() == Material.BED) {
+                entity.remove();
+            }
+        }
     }
 
     // Pseudo raccourci avec un point quand il depasse la limite de la ligne du scoreboard.
@@ -804,7 +814,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     // Top 10 du classe, trie par elo decroissant.
-    private void showLeaderboard(CommandSender sender) {
+    // Joueurs classes, par elo decroissant.
+    public List<UUID> rankedIds() {
         List<UUID> ids = new ArrayList<UUID>();
         if (plugin.getConfig().isConfigurationSection("ranked.elo")) {
             for (String key : plugin.getConfig().getConfigurationSection("ranked.elo").getKeys(false)) {
@@ -821,7 +832,11 @@ public class BedFightManager implements Listener, CommandExecutor {
                 return Integer.compare(getElo(b), getElo(a));
             }
         });
+        return ids;
+    }
 
+    private void showLeaderboard(CommandSender sender) {
+        List<UUID> ids = rankedIds();
         sender.sendMessage(HevenlyPlugin.PREFIX + "Classement ranked (top 10) :");
         if (ids.isEmpty()) {
             sender.sendMessage(ChatColor.GRAY + "Aucune partie classee pour le moment.");
@@ -1176,6 +1191,15 @@ public class BedFightManager implements Listener, CommandExecutor {
             for (Location loc : getConfiguredBedLocations(match.arena, bedTeam)) {
                 loc.getBlock().setType(Material.AIR);
             }
+            // Un lit casse ne doit rester ni au sol ni en objet : on retire les lits tombes, tout de suite et au tick suivant.
+            final Location broken = block.getLocation();
+            removeDroppedBeds(broken);
+            Bukkit.getScheduler().runTask(plugin, new Runnable() {
+                @Override
+                public void run() {
+                    removeDroppedBeds(broken);
+                }
+            });
             broadcastMatch(match, ChatColor.GOLD + "Le lit de l'equipe " + teamColor(bedTeam)
                     + bedTeam.toUpperCase(Locale.ROOT) + ChatColor.GOLD + " a ete detruit par "
                     + player.getName() + " !");
