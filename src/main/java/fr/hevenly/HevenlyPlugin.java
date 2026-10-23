@@ -673,21 +673,38 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             Objective objective = board.getObjective("hevenly");
             if (objective == null) continue;
             // 8 lettres en prefixe et 5 en suffixe : chaque lettre compte pour 2 caracteres de couleur.
-            setSidebarTeamLine(board, objective, "hv_sb6", "§6",
-                    websiteText(0, 8, shine), websiteText(8, WEBSITE.length(), shine), 1);
+            String[] parts = websiteParts(shine);
+            setSidebarTeamLine(board, objective, "hv_sb6", "§6", parts[0], parts[1], 1);
         }
     }
 
     // Lettre au centre du reflet en blanc, voisines en gris, le reste en rouge clair.
-    private String websiteText(int from, int to, int shine) {
-        StringBuilder text = new StringBuilder();
-        for (int i = from; i < to; i++) {
-            int distance = Math.abs(i - shine);
-            ChatColor color = distance == 0 ? ChatColor.WHITE
-                    : distance == 1 ? ChatColor.GRAY : ChatColor.RED;
-            text.append(color).append(WEBSITE.charAt(i));
+    // Un code couleur n'est ecrit que quand la couleur change, pour tenir dans les 16 caracteres
+    // de prefixe et de suffixe. Le suffixe repart toujours avec son propre code.
+    private String[] websiteParts(int shine) {
+        StringBuilder prefix = new StringBuilder();
+        StringBuilder suffix = new StringBuilder();
+        ChatColor last = null;
+        int i = 0;
+        for (; i < WEBSITE.length(); i++) {
+            ChatColor color = websiteColor(i, shine);
+            String piece = (color != last ? color.toString() : "") + WEBSITE.charAt(i);
+            if (prefix.length() + piece.length() > 16) break;
+            prefix.append(piece);
+            last = color;
         }
-        return text.toString();
+        last = null;
+        for (; i < WEBSITE.length(); i++) {
+            ChatColor color = websiteColor(i, shine);
+            suffix.append(color != last ? color.toString() : "").append(WEBSITE.charAt(i));
+            last = color;
+        }
+        return new String[] {prefix.toString(), suffix.toString()};
+    }
+
+    private ChatColor websiteColor(int index, int shine) {
+        int distance = Math.abs(index - shine);
+        return distance == 0 ? ChatColor.WHITE : distance == 1 ? ChatColor.GRAY : ChatColor.RED;
     }
 
     private void updateScoreboards() {
@@ -711,11 +728,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             String rank = getRank(player).toUpperCase(Locale.ROOT);
-            setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 6);
-            setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fJoueur en ", "§fligne: §a" + onlineCount, 5);
+            setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
+            setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fEn ligne : ", "§a" + onlineCount, 6);
             // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
-            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 4);
-            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fRanked: ", "§a" + getPlayerElo(player), 3);
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade: ", getRankColor(rank).toString() + rank, 5);
+            // Couleur par defaut, ou la couleur choisie et enregistree dans la config.
+            PlayerColor stored = getStoredColor(player);
+            setSidebarTeamLine(board, objective, "hv_sb7", "§0", "§fCouleur : ",
+                    stored == null ? "§fDefaut" : stored.chat + stored.label, 4);
+            setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo : ", "§a" + getPlayerElo(player), 3);
             setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
         }
     }
