@@ -456,9 +456,13 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     // Format demandé : §7[<couleur du grade>GRADE§7]
     private String getRankPrefix(String rank) {
+        return getRankPrefix(rank, getRankColor(rank));
+    }
+
+    // Le crochet prend la couleur donnee (couleur choisie par le joueur, si elle existe).
+    private String getRankPrefix(String rank, ChatColor color) {
         if ("default".equalsIgnoreCase(rank)) return "";
-        return ChatColor.GRAY + "[" + getRankColor(rank)
-                + getRankLabel(rank) + ChatColor.GRAY + "] ";
+        return ChatColor.GRAY + "[" + color + getRankLabel(rank) + ChatColor.GRAY + "] ";
     }
 
     private ChatColor getRankColor(String rank) {
@@ -496,11 +500,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         // Echappe les pourcentages pour eviter les erreurs de formatage.
         String safeName = player.getName().replace("%", "%%");
 
-        String rankPrefix = getRankPrefix(getRank(player));
+        // Couleur choisie : crochet, pseudo et message ; sinon couleurs du grade.
+        ChatColor messageColor = chosen != null ? chosen.chat : ChatColor.WHITE;
+        String rankPrefix = chosen != null
+                ? getRankPrefix(getRank(player), chosen.chat)
+                : getRankPrefix(getRank(player));
         event.setFormat(
                 ChatColor.RESET + rankPrefix + nameColor + safeName
                 + ChatColor.DARK_GRAY + " > "
-                + ChatColor.WHITE + "%2$s"
+                + messageColor + "%2$s"
         );
     }
 
@@ -542,8 +550,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         } else {
             String label = getRankLabel(rank);
             if ("premium".equalsIgnoreCase(rank)) label = "PREM";
-            teamPrefix = ChatColor.GRAY + "[" + getRankColor(rank) + label
-                    + ChatColor.GRAY + "] " + (nameColor != null ? nameColor : getRankColor(rank));
+            ChatColor shownColor = nameColor != null ? nameColor : getRankColor(rank);
+            teamPrefix = ChatColor.GRAY + "[" + shownColor + label
+                    + ChatColor.GRAY + "] " + shownColor;
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
         team.setPrefix(teamPrefix);
@@ -1107,7 +1116,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         sendWelcome(player);
 
         // Le lobby est toujours en survie.
-        player.setGameMode(GameMode.SURVIVAL);
+        if (!player.isOp()) {
+            player.setGameMode(GameMode.SURVIVAL);
+        }
 
         // Efface ce qui reste d'une partie deconnectee : le lobby donne ses propres objets.
         player.getInventory().clear();
@@ -1345,7 +1356,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // Creatif interdit : seule la survie est autorisee.
     @EventHandler
     public void onGameModeChange(PlayerGameModeChangeEvent event) {
-        if (event.getNewGameMode() == GameMode.CREATIVE) {
+        // Les ops gardent le creatif (/gamemode 1) ; les autres joueurs restent en survie.
+        if (event.getNewGameMode() == GameMode.CREATIVE && !event.getPlayer().isOp()) {
             event.setCancelled(true);
         }
     }
