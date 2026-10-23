@@ -88,6 +88,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     // Pseudos en minuscules -> couleur d'equipe pendant un match (pas de grade au-dessus de la tete).
     private final Map<String, ChatColor> matchColors =
             new ConcurrentHashMap<String, ChatColor>();
+    // Pseudos en minuscules -> couleur choisie retenue pour le match en cours.
+    private final Map<String, PlayerColor> matchChoices =
+            new ConcurrentHashMap<String, PlayerColor>();
     // Pseudos en minuscules -> couleur choisie (grades plus, premium, mod, owner).
     private final Map<String, PlayerColor> colorChoices =
             new ConcurrentHashMap<String, PlayerColor>();
@@ -807,10 +810,15 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 || "mod".equalsIgnoreCase(rank) || "owner".equalsIgnoreCase(rank);
     }
 
-    // Couleur choisie, seulement si le grade le permet.
-    PlayerColor getColorChoice(Player player) {
+    // Couleur choisie, telle qu'enregistree (grade permettant).
+    PlayerColor getStoredColor(Player player) {
         if (!canChooseColor(getRank(player))) return null;
         return colorChoices.get(getPlayerKey(player));
+    }
+
+    // Couleur effectivement utilisee : seulement pendant un match, sinon le grade prime.
+    PlayerColor getColorChoice(Player player) {
+        return matchChoices.get(getPlayerKey(player));
     }
 
     private void setColorChoice(Player player, PlayerColor color) {
@@ -826,7 +834,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     private void openColorGui(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 27, COLOR_GUI_TITLE);
-        PlayerColor current = getColorChoice(player);
+        PlayerColor current = getStoredColor(player);
         PlayerColor[] colors = PlayerColor.values();
         for (int i = 0; i < colors.length; i++) {
             PlayerColor color = colors[i];
@@ -844,13 +852,20 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         player.openInventory(inventory);
     }
 
-    // Pendant un match, le pseudo prend la couleur de l'equipe (null = remettre le grade).
-    void setMatchColor(Player player, ChatColor color) {
+    // Pendant un match : couleur d'equipe par defaut, et couleur choisie si elle est retenue.
+    // null = fin de match, le grade revient.
+    void setMatchColor(Player player, ChatColor teamColor, PlayerColor chosen) {
         String key = getPlayerKey(player);
-        if (color == null) {
+        if (teamColor == null) {
             matchColors.remove(key);
+            matchChoices.remove(key);
         } else {
-            matchColors.put(key, color);
+            matchColors.put(key, teamColor);
+            if (chosen == null) {
+                matchChoices.remove(key);
+            } else {
+                matchChoices.put(key, chosen);
+            }
         }
         refreshAllBoards();
     }
@@ -897,7 +912,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                         + (enabled ? "ACTIVE" : "DESACTIVE"),
                 ChatColor.GRAY + "Affiche le grade au-dessus de la tete et dans le TAB.",
                 ChatColor.YELLOW + "Clique pour changer"));
-        PlayerColor chosen = getColorChoice(player);
+        PlayerColor chosen = getStoredColor(player);
         inventory.setItem(13, createGuiItem(Material.WOOL,
                 ChatColor.AQUA + "Couleur du pseudo",
                 ChatColor.GRAY + "Pseudo, laine et armure : " + (chosen == null ? "par defaut" : chosen.label),
@@ -1157,6 +1172,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         event.setQuitMessage(null);
         buildMode.remove(event.getPlayer().getUniqueId());
         matchColors.remove(getPlayerKey(event.getPlayer()));
+        matchChoices.remove(getPlayerKey(event.getPlayer()));
 
         // Recalcule les equipes restantes après le depart.
         Bukkit.getScheduler().runTask(this, new Runnable() {
