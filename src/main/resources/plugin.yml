@@ -30,6 +30,15 @@ commands:
   bfleave:
     description: Quitter la file d'attente BedFight
     usage: /bfleave
+  invite:
+    description: Inviter un joueur en 2v2 BedFight, ou accepter une invitation
+    usage: /invite <pseudo|accept>
+  help:
+    description: Afficher la liste des commandes
+    usage: /help
+  clearchat:
+    description: Vider le chat (owner, mod, helper)
+    usage: /clearchat
 
 permissions:
   hevenly.setspawn:
