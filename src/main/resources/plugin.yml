@@ -32,6 +32,9 @@ commands:
   elo:
     description: Affiche ton elo classe ou celui d'un joueur
     usage: /elo [pseudo]
+  leaderboard:
+    description: Top 10 du classement ranked
+    usage: /leaderboard
   build:
     description: Active ou desactive le mode construction hors match (op)
     usage: /build

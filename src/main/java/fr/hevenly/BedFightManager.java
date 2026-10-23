@@ -2,6 +2,8 @@ package fr.hevenly;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -14,6 +16,7 @@ import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Color;
+import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
@@ -30,6 +33,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerRespawnEvent;
 import org.bukkit.inventory.ItemStack;
@@ -42,6 +46,12 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final long INVITE_TIMEOUT_MS = 60000L;
     // Nom de la hache du kit : tout autre bois de hache est refuse en match (outil WorldEdit).
     static final String MATCH_AXE_NAME = ChatColor.GRAY + "Hache en bois";
+    // Slots du kit par disposition : [epee, laine, cisaille, hache].
+    private static final int[][] KIT_SLOTS = {
+        {0, 1, 2, 3},
+        {1, 0, 3, 2},
+        {3, 2, 1, 0}
+    };
     // Hauteur maximale de pose, au-dessus du spawn de l'equipe.
     private static final int MAX_BUILD_HEIGHT = 10;
     private static final long MATCHMAKING_PERIOD_TICKS = 100L;
@@ -212,7 +222,6 @@ public class BedFightManager implements Listener, CommandExecutor {
             soloQueue.add(id);
         }
         giveQueueItems(player);
-        teleportToLobby(player);
 
         if (ranked) {
             player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
@@ -344,25 +353,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         player.updateInventory();
     }
 
+    // Quitter une file ou un groupe ne deplace pas le joueur : seuls les objets du lobby reviennent.
     private void returnToLobby(Player player) {
         plugin.giveSpecialItems(player);
-        teleportToLobby(player);
-    }
-
-    // Teleportation au tick suivant : un changement d'inventaire ou une fermeture de GUI
-    // dans le meme tick pouvait annuler le deplacement.
-    private void teleportToLobby(final Player player) {
-        final Location lobby = getLobbySpawn();
-        if (lobby == null) {
-            player.sendMessage(ChatColor.RED + "Le spawn du lobby n'est pas defini (/setspawn).");
-            return;
-        }
-        Bukkit.getScheduler().runTask(plugin, new Runnable() {
-            @Override
-            public void run() {
-                if (player.isOnline()) player.teleport(lobby);
-            }
-        });
     }
 
     private void warnIfNoArena(Player player) {
@@ -514,7 +507,7 @@ public class BedFightManager implements Listener, CommandExecutor {
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         String[] commands = {"bfsetspawn", "bfsetbed", "bfstart", "bfleave", "invite",
-                "bfarenas", "bfarena", "elo"};
+                "bfarenas", "bfarena", "elo", "leaderboard"};
         for (String name : commands) {
             if (plugin.getCommand(name) != null) {
                 plugin.getCommand(name).setExecutor(this);
@@ -579,7 +572,7 @@ public class BedFightManager implements Listener, CommandExecutor {
                 return true;
             }
             if (startNextMatch()) {
-                sender.sendMessage(ChatColor.GREEN + "Partie BedFight demarree.");
+                sender.sendMessage(HevenlyPlugin.PREFIX + "Partie BedFight demarree.");
             } else {
                 sender.sendMessage(ChatColor.RED + "Pas assez de joueurs en file ou aucune arene libre.");
             }
@@ -638,7 +631,12 @@ public class BedFightManager implements Listener, CommandExecutor {
                 return true;
             }
             player.teleport(spawn);
-            player.sendMessage(ChatColor.GREEN + "Tu es teleporte a l'arene " + args[0].toLowerCase(Locale.ROOT) + ".");
+            player.sendMessage(HevenlyPlugin.PREFIX + "Tu es teleporte a l'arene " + args[0].toLowerCase(Locale.ROOT) + ".");
+            return true;
+        }
+
+        if (name.equals("leaderboard")) {
+            showLeaderboard(sender);
             return true;
         }
 
@@ -658,7 +656,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             }
             UUID id = target.getUniqueId();
             int elo = getElo(id);
-            sender.sendMessage(ChatColor.GOLD + "ELO de " + target.getName() + " : " + ChatColor.GREEN + elo
+            sender.sendMessage(HevenlyPlugin.PREFIX + "ELO de " + target.getName() + " : " + ChatColor.GREEN + elo
                     + ChatColor.GRAY + " (" + tierName(elo) + ") - "
                     + getStat(id, "wins") + " victoires, " + getStat(id, "losses") + " defaites");
             return true;
@@ -667,13 +665,48 @@ public class BedFightManager implements Listener, CommandExecutor {
         return false;
     }
 
+    // Top 10 du classe, trie par elo decroissant.
+    private void showLeaderboard(CommandSender sender) {
+        List<UUID> ids = new ArrayList<UUID>();
+        if (plugin.getConfig().isConfigurationSection("ranked.elo")) {
+            for (String key : plugin.getConfig().getConfigurationSection("ranked.elo").getKeys(false)) {
+                try {
+                    ids.add(UUID.fromString(key));
+                } catch (IllegalArgumentException ignored) {
+                    // Cle qui n'est pas un UUID : on l'ignore.
+                }
+            }
+        }
+        Collections.sort(ids, new Comparator<UUID>() {
+            @Override
+            public int compare(UUID a, UUID b) {
+                return Integer.compare(getElo(b), getElo(a));
+            }
+        });
+
+        sender.sendMessage(HevenlyPlugin.PREFIX + "Classement ranked (top 10) :");
+        if (ids.isEmpty()) {
+            sender.sendMessage(ChatColor.GRAY + "Aucune partie classee pour le moment.");
+            return;
+        }
+        for (int i = 0; i < Math.min(10, ids.size()); i++) {
+            UUID id = ids.get(i);
+            String name = Bukkit.getOfflinePlayer(id).getName();
+            int elo = getElo(id);
+            sender.sendMessage(ChatColor.GRAY + "" + (i + 1) + ". " + ChatColor.WHITE
+                    + (name == null ? "?" : name) + ChatColor.GRAY + " - " + ChatColor.GREEN + elo
+                    + ChatColor.GRAY + " (" + tierName(elo) + ") " + getStat(id, "wins") + "V / "
+                    + getStat(id, "losses") + "D");
+        }
+    }
+
     private void listArenas(Player player) {
         List<String> names = arenaNames();
         if (names.isEmpty()) {
             player.sendMessage(ChatColor.RED + "Aucune arene configuree.");
             return;
         }
-        player.sendMessage(ChatColor.GOLD + "Arenes BedFight :");
+        player.sendMessage(HevenlyPlugin.PREFIX + "Arenes BedFight :");
         for (String name : names) {
             String status;
             if (!isArenaComplete(name)) {
@@ -917,6 +950,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     private void preparePlayer(Match match, Player player, String team) {
+        player.setGameMode(GameMode.SURVIVAL);
+        plugin.setMatchColor(player, teamColor(team));
         player.setHealth(20.0);
         player.setFoodLevel(20);
         player.setFireTicks(0);
@@ -935,10 +970,12 @@ public class BedFightManager implements Listener, CommandExecutor {
         PlayerInventory inv = player.getInventory();
         inv.clear();
         inv.setArmorContents(null);
-        inv.setItem(0, unbreakable(new ItemStack(Material.WOOD_SWORD)));
-        inv.setItem(1, new ItemStack(Material.WOOL, 64, (short) 0, (byte) (red ? 14 : 11)));
-        inv.setItem(2, unbreakable(new ItemStack(Material.SHEARS)));
-        inv.setItem(3, namedUnbreakable(Material.WOOD_AXE, MATCH_AXE_NAME));
+        // Ordre des objets : epee, laine, cisaille, hache ; la disposition vient du menu Config.
+        int[] slots = KIT_SLOTS[plugin.getKitLayout(player) % KIT_SLOTS.length];
+        inv.setItem(slots[0], unbreakable(new ItemStack(Material.WOOD_SWORD)));
+        inv.setItem(slots[1], new ItemStack(Material.WOOL, 64, (short) 0, (byte) (red ? 14 : 11)));
+        inv.setItem(slots[2], unbreakable(new ItemStack(Material.SHEARS)));
+        inv.setItem(slots[3], namedUnbreakable(Material.WOOD_AXE, MATCH_AXE_NAME));
         inv.setItem(4, new ItemStack(Material.WOOD_PICKAXE));
         Color color = red ? Color.RED : Color.BLUE;
         inv.setHelmet(leather(Material.LEATHER_HELMET, color));
@@ -1045,6 +1082,15 @@ public class BedFightManager implements Listener, CommandExecutor {
         match.rememberOriginal(new BlockKey(event.getBlockPlaced().getWorld().getName(),
                 event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()),
                 replaced.getType(), replaced.getRawData());
+    }
+
+    // En match, mort des la couche -1 pour aller plus vite. Hors match, rien ne change.
+    @EventHandler
+    public void onMatchFall(PlayerMoveEvent event) {
+        if (event.getTo().getBlockY() > -1) return;
+        Player player = event.getPlayer();
+        if (activeMatchOf(player.getUniqueId()) == null || player.isDead()) return;
+        player.setHealth(0.0);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -1182,7 +1228,9 @@ public class BedFightManager implements Listener, CommandExecutor {
                 Location lobby = getLobbySpawn();
                 for (UUID id : participants) {
                     Player player = Bukkit.getPlayer(id);
-                    if (player == null || player.isDead()) continue;
+                    if (player == null) continue;
+                    plugin.setMatchColor(player, null);
+                    if (player.isDead()) continue;
                     player.getInventory().clear();
                     player.getInventory().setArmorContents(null);
                     if (lobby != null) player.teleport(lobby);
