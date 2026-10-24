@@ -30,6 +30,8 @@ class LeaderboardHolo {
 
     // Pose l'hologramme a cet endroit et le memorise dans la config.
     void place(Location location) {
+        // Un seul hologramme a la fois : on retire tous ceux qui sont affiches.
+        clearAll();
         plugin.getConfig().set("holo.leaderboard.world", location.getWorld().getName());
         plugin.getConfig().set("holo.leaderboard.x", location.getX());
         plugin.getConfig().set("holo.leaderboard.y", location.getY());
@@ -79,6 +81,14 @@ class LeaderboardHolo {
             stand.getClass().getMethod("setGravity", boolean.class).invoke(stand, false);
         } catch (ReflectiveOperationException ignored) {
             // Methode absente : l'hologramme reste soumis a la gravite.
+        }
+    }
+
+    private void clearAll() {
+        for (World world : Bukkit.getWorlds()) {
+            for (ArmorStand stand : world.getEntitiesByClass(ArmorStand.class)) {
+                if (stand.hasMetadata(META)) stand.remove();
+            }
         }
     }
 

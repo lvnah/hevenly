@@ -57,6 +57,13 @@ commands:
   clearchat:
     description: Vider le chat (owner, mod, helper)
     usage: /clearchat
+    aliases: [cc]
+  gm:
+    description: Change ton mode de jeu (0 survie, 1 creatif pour les op)
+    usage: /gm <0|1>
+  mod:
+    description: Outils mod et owner
+    usage: /mod
 
 permissions:
   hevenly.setspawn:
