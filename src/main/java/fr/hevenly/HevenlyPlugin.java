@@ -77,6 +77,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String GAME_GUI_TITLE = ChatColor.RED + "Hevenly » BedFight";
     private static final String CONFIG_GUI_TITLE = ChatColor.DARK_GRAY + "Configuration";
     private static final String COLOR_GUI_TITLE = ChatColor.DARK_GRAY + "Couleur du pseudo";
+    private static final String MAP_GUI_TITLE = ChatColor.DARK_GRAY + "Choisir la map";
     private static final String BUNGEE_CHANNEL = "BungeeCord";
     private static final String[] STAFF_RANKS = {"owner", "mod", "helper"};
     private static final String QUEUE_LEAVE_NAME = ChatColor.RED + "Quitter la file";
@@ -316,7 +317,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             updatePlayerVisuals(target);
 
             String coloredRank = getRankColor(newRank)
-                    + newRank.toUpperCase(Locale.ROOT);
+                    + getRankLabel(newRank);
 
             sender.sendMessage(PREFIX
                     + "Le grade de " + target.getName()
@@ -576,7 +577,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             case "helper": return "HELPER";
             case "premium": return "PREMIUM";
             case "plus": return "PLUS";
-            default: return "DEFAULT";
+            default: return "BASIQUE";
         }
     }
 
@@ -872,7 +873,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 continue;
             }
 
-            String rank = getRank(player).toUpperCase(Locale.ROOT);
+            String rank = getRankLabel(getRank(player));
             setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
             setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fEn ligne ", "§7» §a" + onlineCount, 6);
             // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
@@ -1105,6 +1106,26 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return item;
     }
 
+    // Grades premium, mod et owner : choix de la map pour la file.
+    private boolean canChooseMap(Player player) {
+        String rank = getRank(player);
+        return "premium".equalsIgnoreCase(rank) || "mod".equalsIgnoreCase(rank) || "owner".equalsIgnoreCase(rank);
+    }
+
+    private void openMapGui(Player player) {
+        Inventory inventory = Bukkit.createInventory(null, 27, MAP_GUI_TITLE);
+        List<String> arenas = bedFightManager.completeArenaNames();
+        String current = bedFightManager.getPreferredArena(player);
+        for (int i = 0; i < Math.min(arenas.size(), 12); i++) {
+            String name = arenas.get(i);
+            inventory.setItem(10 + i, createGuiItem(Material.MAP, ChatColor.AQUA + name,
+                    name.equals(current) ? ChatColor.GREEN + "Choisie" : ChatColor.GRAY + "Clique pour choisir"));
+        }
+        inventory.setItem(22, createGuiItem(Material.EYE_OF_ENDER, ChatColor.YELLOW + "Aleatoire",
+                ChatColor.GRAY + "Pas de map choisie"));
+        player.openInventory(inventory);
+    }
+
     private void openGameGui(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 27, GAME_GUI_TITLE);
         inventory.setItem(11, createGuiItem(Material.IRON_SWORD,
@@ -1113,6 +1134,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         inventory.setItem(15, createGuiItem(Material.DIAMOND_SWORD,
                 ChatColor.RED + "BedFight 1v1 Ranked",
                 ChatColor.GRAY + "Partie classee", ChatColor.YELLOW + "Clique pour rejoindre"));
+        boolean canMap = canChooseMap(player);
+        inventory.setItem(4, createGuiItem(Material.MAP,
+                ChatColor.AQUA + "Choisir la map",
+                canMap ? ChatColor.GRAY + "Tu tomberas sur la map choisie si elle est libre"
+                        : ChatColor.RED + "Reserve aux grades Premium, Mod et Owner",
+                canMap ? ChatColor.YELLOW + "Clique pour choisir" : ChatColor.GRAY + "Grade requis"));
         inventory.setItem(22, createGuiItem(Material.DIAMOND_CHESTPLATE,
                 ChatColor.AQUA + "BedFight 2v2 Unranked",
                 ChatColor.GRAY + "Partie en equipe avec ton groupe", ChatColor.YELLOW + "Clique pour rejoindre"));
@@ -1277,11 +1304,31 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (!(event.getWhoClicked() instanceof Player)) return;
         String title = event.getView().getTitle();
         if (!GAME_GUI_TITLE.equals(title) && !CONFIG_GUI_TITLE.equals(title)
-                && !COLOR_GUI_TITLE.equals(title)) return;
+                && !COLOR_GUI_TITLE.equals(title) && !MAP_GUI_TITLE.equals(title)) return;
         event.setCancelled(true);
         if (event.getRawSlot() < 0 || event.getRawSlot() >= event.getView().getTopInventory().getSize()) return;
 
         Player player = (Player) event.getWhoClicked();
+        if (GAME_GUI_TITLE.equals(title) && event.getRawSlot() == 4) {
+            if (!canChooseMap(player)) {
+                player.sendMessage(PREFIX + "Cette option est reservee aux grades Premium, Mod et Owner.");
+                return;
+            }
+            openMapGui(player);
+            return;
+        }
+        if (MAP_GUI_TITLE.equals(title)) {
+            int slot = event.getRawSlot();
+            List<String> arenas = bedFightManager.completeArenaNames();
+            if (slot >= 10 && slot < 10 + Math.min(arenas.size(), 12)) {
+                bedFightManager.setPreferredArena(player, arenas.get(slot - 10));
+                player.closeInventory();
+            } else if (slot == 22) {
+                bedFightManager.setPreferredArena(player, null);
+                player.closeInventory();
+            }
+            return;
+        }
         if (COLOR_GUI_TITLE.equals(title)) {
             int slot = event.getRawSlot();
             List<PlayerColor> colors = allowedColors(getRank(player));
@@ -1535,7 +1582,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         String viewTitle = event.getView().getTitle();
         if (GAME_GUI_TITLE.equals(viewTitle) || CONFIG_GUI_TITLE.equals(viewTitle)
-                || COLOR_GUI_TITLE.equals(viewTitle)) {
+                || COLOR_GUI_TITLE.equals(viewTitle) || MAP_GUI_TITLE.equals(viewTitle)) {
             event.setCancelled(true);
             return;
         }
@@ -1582,7 +1629,6 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         Player player = event.getPlayer();
         if (bedFightManager.isInMatch(player) || canBuildOutsideMatch(player)) return;
         event.setCancelled(true);
-        player.sendMessage(ChatColor.RED + "Tu ne peux pas casser ici.");
     }
 
     @EventHandler
@@ -1642,7 +1688,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         Player online = Bukkit.getPlayerExact(name);
         if (online != null) {
-            online.sendMessage(PREFIX + "Tu as gagne le grade " + getRankColor(rank) + rank.toUpperCase(Locale.ROOT)
+            online.sendMessage(PREFIX + "Tu as gagne le grade " + getRankColor(rank) + getRankLabel(rank)
                     + ChatColor.WHITE + " pour 1 mois !");
         }
     }

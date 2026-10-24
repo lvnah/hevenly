@@ -91,6 +91,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     private final Map<UUID, Long> rankedSince = new HashMap<UUID, Long>();
     // Moment d'entree en file, pour le temps d'attente affiche au scoreboard.
     private final Map<UUID, Long> queuedAt = new HashMap<UUID, Long>();
+    // Map choisie par les grades premium et plus (absent = aleatoire).
+    private final Map<UUID, String> preferredArena = new HashMap<UUID, String>();
     // File 2v2 non classee : un groupe par entree.
     private final List<Party> duoQueue = new ArrayList<Party>();
     // Groupes 2v2 : chaque membre pointe vers le meme objet.
@@ -468,10 +470,9 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     // Ordre : 2v2, puis 1v1 classee (elo proche), puis 1v1 non classee.
     private boolean startNextMatch() {
-        String arena = freeArena();
-        if (arena == null) return false;
-
         if (duoQueue.size() >= 2) {
+            String arena = freeArena();
+            if (arena == null) return false;
             Party red = duoQueue.remove(0);
             Party blue = duoQueue.remove(0);
             startMatch(arena, false, true, red.members(), blue.members(), Arrays.asList(red, blue));
@@ -480,6 +481,8 @@ public class BedFightManager implements Listener, CommandExecutor {
 
         UUID[] pair = findRankedPair();
         if (pair != null) {
+            String arena = arenaFor(pair[0], pair[1]);
+            if (arena == null) return false;
             rankedQueue.remove(pair[0]);
             rankedQueue.remove(pair[1]);
             rankedSince.remove(pair[0]);
@@ -489,6 +492,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         }
 
         if (soloQueue.size() >= 2) {
+            String arena = arenaFor(soloQueue.get(0), soloQueue.get(1));
+            if (arena == null) return false;
             UUID red = soloQueue.remove(0);
             UUID blue = soloQueue.remove(0);
             startMatch(arena, false, false, Arrays.asList(red), Arrays.asList(blue), new ArrayList<Party>());
@@ -621,6 +626,51 @@ public class BedFightManager implements Listener, CommandExecutor {
             if (isArenaComplete(name) && !isArenaBusy(name)) return name;
         }
         return null;
+    }
+
+    private boolean isArenaFree(String name) {
+        return isArenaComplete(name) && !isArenaBusy(name);
+    }
+
+    public List<String> completeArenaNames() {
+        List<String> names = new ArrayList<String>();
+        for (String name : arenaNames()) {
+            if (isArenaComplete(name)) names.add(name);
+        }
+        return names;
+    }
+
+    public String getPreferredArena(Player player) {
+        return preferredArena.get(player.getUniqueId());
+    }
+
+    // Map choisie ; null = aleatoire.
+    public void setPreferredArena(Player player, String arena) {
+        if (arena == null) {
+            preferredArena.remove(player.getUniqueId());
+            player.sendMessage(HevenlyPlugin.PREFIX + "Map : aleatoire.");
+        } else {
+            preferredArena.put(player.getUniqueId(), arena);
+            player.sendMessage(HevenlyPlugin.PREFIX + "Map choisie : " + arena + ". Tu tomberas dessus si elle est libre.");
+        }
+    }
+
+    // Map d'un match : parmi les maps choisies par les deux joueurs si l'une est libre (au hasard),
+    // sinon une map libre au hasard.
+    private String arenaFor(UUID a, UUID b) {
+        List<String> wanted = new ArrayList<String>();
+        for (UUID id : Arrays.asList(a, b)) {
+            String choice = preferredArena.get(id);
+            if (choice != null && isArenaFree(choice) && !wanted.contains(choice)) wanted.add(choice);
+        }
+        Random random = new Random();
+        if (!wanted.isEmpty()) return wanted.get(random.nextInt(wanted.size()));
+
+        List<String> free = new ArrayList<String>();
+        for (String name : arenaNames()) {
+            if (isArenaFree(name)) free.add(name);
+        }
+        return free.isEmpty() ? null : free.get(random.nextInt(free.size()));
     }
 
     private boolean isArenaBusy(String name) {
