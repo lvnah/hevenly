@@ -84,12 +84,27 @@ class LeaderboardHolo {
         }
     }
 
+    // Retire tous les hologrammes et oublie l'emplacement memorise.
+    void remove() {
+        clearAll();
+        plugin.getConfig().set("holo.leaderboard", null);
+        plugin.saveConfig();
+    }
+
+    // Retire les armor stands de l'hologramme : ceux poses par le plugin, et ceux qui en portent le texte.
     private void clearAll() {
         for (World world : Bukkit.getWorlds()) {
             for (ArmorStand stand : world.getEntitiesByClass(ArmorStand.class)) {
-                if (stand.hasMetadata(META)) stand.remove();
+                if (stand.hasMetadata(META) || isLeaderboardText(stand.getCustomName())) stand.remove();
             }
         }
+    }
+
+    private boolean isLeaderboardText(String name) {
+        if (name == null) return false;
+        String plain = ChatColor.stripColor(name);
+        return plain.equals("TOP 10 LEADERBOARD") || plain.equals("Aucune partie classee")
+                || plain.matches("^\\d+\\. .+ - \\d+$");
     }
 
     private void clear(Location base) {
