@@ -30,6 +30,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
+import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -153,6 +154,16 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (getCommand("gm") != null) {
             getCommand("gm").setExecutor(this);
         }
+        if (getCommand("season") != null) {
+            getCommand("season").setExecutor(this);
+        }
+        // Grades temporaires expires : verifies toutes les 10 minutes.
+        Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
+            @Override
+            public void run() {
+                checkTemporaryRanks();
+            }
+        }, 12000L, 12000L);
         if (getCommand("mod") != null) {
             getCommand("mod").setExecutor(this);
         }
@@ -394,6 +405,19 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             player.sendMessage(ChatColor.YELLOW + "/cc " + ChatColor.GRAY + "- Vider le chat");
             player.sendMessage(ChatColor.YELLOW + "/bfarenas " + ChatColor.GRAY + "- Voir les arenes");
             player.sendMessage(ChatColor.YELLOW + "/bfarena <nom> " + ChatColor.GRAY + "- Aller dans une arene");
+            return true;
+        }
+
+        if (commandName.equals("season")) {
+            if (!(sender instanceof Player) || !((Player) sender).isOp()) {
+                sender.sendMessage(ChatColor.RED + "Cette commande est reservee aux op.");
+                return true;
+            }
+            if (args.length != 1 || !args[0].equalsIgnoreCase("reward")) {
+                sender.sendMessage(ChatColor.RED + "Utilisation : /season reward");
+                return true;
+            }
+            rewardSeason(sender);
             return true;
         }
 
@@ -1323,6 +1347,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerJoin(PlayerJoinEvent event) {
         final Player player = event.getPlayer();
 
+        checkTemporaryRanks();
+
         // Pas de message de connexion public : seul le message d'accueil est envoye.
         event.setJoinMessage(null);
         clearChat(player);
@@ -1573,6 +1599,87 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         // Les ops gardent le creatif (/gamemode 1) ; les autres joueurs restent en survie.
         if (event.getNewGameMode() == GameMode.CREATIVE && !event.getPlayer().isOp()) {
             event.setCancelled(true);
+        }
+    }
+
+    // Eau : retour au spawn du lobby, ou au spawn de son equipe en match.
+    // Les op avec /build actif ne sont pas concernes.
+    @EventHandler
+    public void onWaterTouch(PlayerMoveEvent event) {
+        Material type = event.getTo().getBlock().getType();
+        if (type != Material.WATER && type != Material.STATIONARY_WATER) return;
+        Player player = event.getPlayer();
+        if (canBuildOutsideMatch(player)) return;
+
+        final Location target = bedFightManager.isInMatch(player)
+                ? bedFightManager.teamSpawn(player)
+                : getSpawn();
+        if (target == null) return;
+        Bukkit.getScheduler().runTask(this, new Runnable() {
+            @Override
+            public void run() {
+                if (player.isOnline()) player.teleport(target);
+            }
+        });
+    }
+
+    // --------------------------------------------------
+    // GRADES TEMPORAIRES : RECOMPENSES DE FIN DE SAISON
+    // --------------------------------------------------
+
+    // Donne un grade pour une duree ; l'ancien grade revient a l'expiration.
+    private void grantTemporaryRank(String name, String rank, long until) {
+        String key = name.toLowerCase(Locale.ROOT);
+        String previous = getConfig().contains("temp." + key + ".previous")
+                ? getConfig().getString("temp." + key + ".previous")
+                : playerRanks.getOrDefault(key, "default");
+        getConfig().set("temp." + key + ".rank", rank);
+        getConfig().set("temp." + key + ".previous", previous);
+        getConfig().set("temp." + key + ".until", until);
+        playerRanks.put(key, rank);
+        saveRanks();
+        refreshAllVisuals();
+
+        Player online = Bukkit.getPlayerExact(name);
+        if (online != null) {
+            online.sendMessage(PREFIX + "Tu as gagne le grade " + getRankColor(rank) + rank.toUpperCase(Locale.ROOT)
+                    + ChatColor.WHITE + " pour 1 mois !");
+        }
+    }
+
+    // Retire les grades temporaires expires et remet l'ancien grade.
+    private void checkTemporaryRanks() {
+        if (!getConfig().isConfigurationSection("temp")) return;
+        long now = System.currentTimeMillis();
+        List<String> expired = new java.util.ArrayList<String>();
+        for (String key : getConfig().getConfigurationSection("temp").getKeys(false)) {
+            if (getConfig().getLong("temp." + key + ".until") <= now) expired.add(key);
+        }
+        if (expired.isEmpty()) return;
+
+        for (String key : expired) {
+            playerRanks.put(key, getConfig().getString("temp." + key + ".previous", "default"));
+            getConfig().set("temp." + key, null);
+            Player online = Bukkit.getPlayerExact(key);
+            if (online != null) {
+                online.sendMessage(PREFIX + "Ton grade temporaire est termine.");
+            }
+        }
+        saveRanks();
+        refreshAllVisuals();
+    }
+
+    // Fin de saison : 1er PREMIUM, 2e et 3e PLUS, pour 1 mois.
+    private void rewardSeason(CommandSender sender) {
+        List<UUID> top = bedFightManager.rankedIds();
+        long until = System.currentTimeMillis() + 30L * 24L * 60L * 60L * 1000L;
+        String[] ranks = {"premium", "plus", "plus"};
+        for (int i = 0; i < Math.min(3, top.size()); i++) {
+            String name = Bukkit.getOfflinePlayer(top.get(i)).getName();
+            if (name == null) continue;
+            grantTemporaryRank(name, ranks[i], until);
+            sender.sendMessage(PREFIX + (i + 1) + ". " + name + " : grade "
+                    + ranks[i].toUpperCase(Locale.ROOT) + " pour 1 mois.");
         }
     }
 

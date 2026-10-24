@@ -113,6 +113,13 @@ public class BedFightManager implements Listener, CommandExecutor {
         return activeMatchOf(player.getUniqueId()) != null;
     }
 
+    // Spawn de l'equipe dans l'arene du match, pour un joueur en partie ; null sinon.
+    public Location teamSpawn(Player player) {
+        Match match = activeMatchOf(player.getUniqueId());
+        if (match == null) return null;
+        return readLocation(ARENA_PREFIX + match.arena + ".spawns." + match.teams.get(player.getUniqueId()));
+    }
+
     // Infos du scoreboard de match : {adversaire, duree mm:ss, lit adverse detruit (Oui/Non)}.
     // null si le joueur n'est pas en match.
     public String[] matchLines(Player player) {

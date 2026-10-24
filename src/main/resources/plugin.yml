@@ -38,6 +38,9 @@ commands:
   build:
     description: Active ou desactive le mode construction hors match (op)
     usage: /build
+  season:
+    description: Recompenses de fin de saison pour le top 3 ranked (op)
+    usage: /season reward
   lbholo:
     description: Place l'hologramme du top 10 ranked a ta position, ou supprime tous les hologrammes (op)
     usage: /lbholo [clear]
