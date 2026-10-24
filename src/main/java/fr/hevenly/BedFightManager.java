@@ -299,11 +299,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         giveQueueItems(player);
 
         if (ranked) {
-            player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
-                    + ChatColor.YELLOW + "Recherche d'un adversaire classe (ELO " + getElo(id) + ")...");
+            player.sendMessage(HevenlyPlugin.PREFIX + "Recherche d'un adversaire classe (ELO " + getElo(id) + ")...");
         } else {
-            player.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
-                    + ChatColor.YELLOW + "Recherche d'un adversaire...");
+            player.sendMessage(HevenlyPlugin.PREFIX + "Recherche d'un adversaire...");
         }
         warnIfNoArena(player);
         tryMatchmaking();
@@ -335,8 +333,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             if (member == null) continue;
             queuedAt.put(id, System.currentTimeMillis());
             giveQueueItems(member);
-            member.sendMessage(ChatColor.GOLD + "Hevenly BedFight " + ChatColor.GRAY + "» "
-                    + ChatColor.YELLOW + "Groupe 2v2 : recherche d'un adversaire...");
+            member.sendMessage(HevenlyPlugin.PREFIX + "Groupe 2v2 : recherche d'un adversaire...");
         }
         warnIfNoArena(player);
         tryMatchmaking();
@@ -365,7 +362,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             player.sendMessage(ChatColor.RED + "Tu n'es pas dans la file d'attente.");
             return;
         }
-        player.sendMessage(ChatColor.YELLOW + "Tu as quitte la file BedFight.");
+        player.sendMessage(HevenlyPlugin.PREFIX + "Tu as quitte la file BedFight.");
         returnToLobby(player);
     }
 

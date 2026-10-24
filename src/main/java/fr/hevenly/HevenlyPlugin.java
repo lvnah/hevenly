@@ -409,6 +409,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 return true;
             }
 
+            if (args.length == 1 && args[0].equalsIgnoreCase("clear")) {
+                leaderboardHolo.remove();
+                player.sendMessage(PREFIX + "Tous les hologrammes du top 10 ont ete supprimes.");
+                return true;
+            }
+
             leaderboardHolo.place(player.getLocation());
             player.sendMessage(PREFIX + "Hologramme du top 10 place ici.");
             return true;
@@ -586,8 +592,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerChat(AsyncPlayerChatEvent event) {
         Player player = event.getPlayer();
 
+        // En match : couleur choisie retenue, sinon couleur de l'equipe. Hors match : couleur du grade.
         PlayerColor chosen = getColorChoice(player);
-        ChatColor nameColor = chosen != null ? chosen.chat : getRankColor(getRank(player));
+        ChatColor teamColor = matchColors.get(getPlayerKey(player));
+        ChatColor shown = chosen != null ? chosen.chat : teamColor;
+        ChatColor nameColor = shown != null ? shown : getRankColor(getRank(player));
 
         // Les joueurs ne peuvent pas utiliser de codes couleur dans leur message.
         String message = ChatColor.stripColor(event.getMessage());
@@ -597,9 +606,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         String safeName = player.getName().replace("%", "%%");
 
         // Couleur choisie : crochet, pseudo et message ; sinon couleurs du grade.
-        ChatColor messageColor = chosen != null ? chosen.chat : ChatColor.WHITE;
-        String rankPrefix = chosen != null
-                ? getRankPrefix(getRank(player), chosen.chat)
+        ChatColor messageColor = shown != null ? shown : ChatColor.WHITE;
+        String rankPrefix = shown != null
+                ? getRankPrefix(getRank(player), shown)
                 : getRankPrefix(getRank(player));
         event.setFormat(
                 ChatColor.RESET + rankPrefix + nameColor + safeName
