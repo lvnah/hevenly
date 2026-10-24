@@ -120,7 +120,6 @@ class LeaderboardHolo {
         List<UUID> ids = bedFight.rankedIds();
         if (ids.isEmpty()) {
             lines.add(ChatColor.GRAY + "Aucune partie classee");
-            return lines;
         }
         for (int i = 0; i < Math.min(TOP_COUNT, ids.size()); i++) {
             UUID id = ids.get(i);
@@ -128,6 +127,10 @@ class LeaderboardHolo {
             lines.add(ChatColor.GRAY + "" + (i + 1) + ". " + ChatColor.WHITE + (name == null ? "?" : name)
                     + ChatColor.GRAY + " - " + ChatColor.GREEN + bedFight.getElo(id));
         }
+        // Recompenses de fin de saison, affichees sous le classement.
+        lines.add(ChatColor.YELLOW + "Fin de saison :");
+        lines.add(ChatColor.GRAY + "1er : grade " + ChatColor.RED + "PREMIUM" + ChatColor.GRAY + " 1 mois");
+        lines.add(ChatColor.GRAY + "2e et 3e : grade " + ChatColor.RED + "PLUS" + ChatColor.GRAY + " 1 mois");
         return lines;
     }
 }
