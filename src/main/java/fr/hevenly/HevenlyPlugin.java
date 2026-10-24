@@ -2,6 +2,8 @@ package fr.hevenly;
 
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Iterator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -148,6 +150,12 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (getCommand("lbholo") != null) {
             getCommand("lbholo").setExecutor(this);
         }
+        if (getCommand("gm") != null) {
+            getCommand("gm").setExecutor(this);
+        }
+        if (getCommand("mod") != null) {
+            getCommand("mod").setExecutor(this);
+        }
 
         Bukkit.getPluginManager().registerEvents(this, this);
 
@@ -178,7 +186,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             public void run() {
                 updateScoreboards();
             }
-        }, 0L, 20L);
+        }, 0L, 4L);
 
         // Actualise les grades et les couleurs après le chargement.
         Bukkit.getScheduler().runTaskLater(this, new Runnable() {
@@ -342,6 +350,50 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             }
 
             sendHelp((Player) sender);
+            return true;
+        }
+
+        if (commandName.equals("gm")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+
+            Player player = (Player) sender;
+            if (args.length != 1 || !(args[0].equals("0") || args[0].equals("1"))) {
+                player.sendMessage(ChatColor.RED + "Utilisation : /gm <0|1>");
+                return true;
+            }
+            if (args[0].equals("1")) {
+                if (!player.isOp()) {
+                    player.sendMessage(ChatColor.RED + "Le mode creatif est reserve aux op.");
+                    return true;
+                }
+                player.setGameMode(GameMode.CREATIVE);
+                player.sendMessage(PREFIX + "Mode de jeu : creatif.");
+            } else {
+                player.setGameMode(GameMode.SURVIVAL);
+                player.sendMessage(PREFIX + "Mode de jeu : survie.");
+            }
+            return true;
+        }
+
+        if (commandName.equals("mod")) {
+            if (!(sender instanceof Player)) {
+                sender.sendMessage("Cette commande est reservee aux joueurs.");
+                return true;
+            }
+
+            Player player = (Player) sender;
+            if (!isArenaStaff(player)) {
+                player.sendMessage(ChatColor.RED + "Cette commande est reservee aux mod et owner.");
+                return true;
+            }
+
+            player.sendMessage(PREFIX + "Outils mod :");
+            player.sendMessage(ChatColor.YELLOW + "/cc " + ChatColor.GRAY + "- Vider le chat");
+            player.sendMessage(ChatColor.YELLOW + "/bfarenas " + ChatColor.GRAY + "- Voir les arenes");
+            player.sendMessage(ChatColor.YELLOW + "/bfarena <nom> " + ChatColor.GRAY + "- Aller dans une arene");
             return true;
         }
 
@@ -551,7 +603,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 : getRankPrefix(getRank(player));
         event.setFormat(
                 ChatColor.RESET + rankPrefix + nameColor + safeName
-                + ChatColor.DARK_GRAY + " > "
+                + ChatColor.GRAY + " » "
                 + messageColor + "%2$s"
         );
     }
@@ -928,15 +980,25 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         return kitLayouts.getOrDefault(getPlayerKey(player), 0);
     }
 
+    // Grade plus : 3 couleurs. Premium, mod et owner : toutes les couleurs.
+    static List<PlayerColor> allowedColors(String rank) {
+        List<PlayerColor> all = Arrays.asList(PlayerColor.values());
+        if ("plus".equalsIgnoreCase(rank)) return all.subList(0, 3);
+        if ("premium".equalsIgnoreCase(rank) || "mod".equalsIgnoreCase(rank) || "owner".equalsIgnoreCase(rank)) {
+            return all;
+        }
+        return Collections.emptyList();
+    }
+
     static boolean canChooseColor(String rank) {
-        return "plus".equalsIgnoreCase(rank) || "premium".equalsIgnoreCase(rank)
-                || "mod".equalsIgnoreCase(rank) || "owner".equalsIgnoreCase(rank);
+        return !allowedColors(rank).isEmpty();
     }
 
     // Couleur choisie, telle qu'enregistree (grade permettant).
     PlayerColor getStoredColor(Player player) {
-        if (!canChooseColor(getRank(player))) return null;
-        return colorChoices.get(getPlayerKey(player));
+        PlayerColor stored = colorChoices.get(getPlayerKey(player));
+        if (stored == null || !allowedColors(getRank(player)).contains(stored)) return null;
+        return stored;
     }
 
     // Couleur effectivement utilisee : seulement pendant un match, sinon le grade prime.
@@ -958,9 +1020,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private void openColorGui(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 27, COLOR_GUI_TITLE);
         PlayerColor current = getStoredColor(player);
-        PlayerColor[] colors = PlayerColor.values();
-        for (int i = 0; i < colors.length; i++) {
-            PlayerColor color = colors[i];
+        List<PlayerColor> colors = allowedColors(getRank(player));
+        for (int i = 0; i < colors.size(); i++) {
+            PlayerColor color = colors.get(i);
             ItemStack item = new ItemStack(Material.WOOL, 1, (short) 0, color.dye.getWoolData());
             ItemMeta meta = item.getItemMeta();
             meta.setDisplayName(color.chat + color.label
@@ -1189,9 +1251,9 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         Player player = (Player) event.getWhoClicked();
         if (COLOR_GUI_TITLE.equals(title)) {
             int slot = event.getRawSlot();
-            PlayerColor[] colors = PlayerColor.values();
-            if (slot >= 10 && slot < 10 + colors.length) {
-                PlayerColor picked = colors[slot - 10];
+            List<PlayerColor> colors = allowedColors(getRank(player));
+            if (slot >= 10 && slot < 10 + colors.size()) {
+                PlayerColor picked = colors.get(slot - 10);
                 setColorChoice(player, picked);
                 player.sendMessage(PREFIX + "Couleur choisie : " + picked.chat + picked.label + ChatColor.WHITE + ".");
                 openColorGui(player);

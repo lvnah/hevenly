@@ -654,6 +654,7 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
+        removeDuplicateRanked();
         String[] commands = {"bfsetspawn", "bfsetbed", "bfstart", "bfleave", "invite",
                 "bfarenas", "bfarena", "elo", "leaderboard"};
         for (String name : commands) {
@@ -814,7 +815,43 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     // Top 10 du classe, trie par elo decroissant.
-    // Joueurs classes, par elo decroissant.
+    // Un meme pseudo a parfois deux UUID (compte hors ligne puis en ligne) : on garde le meilleur elo
+    // et on supprime l'autre entree de la config.
+    private void removeDuplicateRanked() {
+        List<UUID> all = new ArrayList<UUID>();
+        if (plugin.getConfig().isConfigurationSection("ranked.elo")) {
+            for (String key : plugin.getConfig().getConfigurationSection("ranked.elo").getKeys(false)) {
+                try {
+                    all.add(UUID.fromString(key));
+                } catch (IllegalArgumentException ignored) {
+                    // Cle qui n'est pas un UUID : ignoree.
+                }
+            }
+        }
+        Map<String, UUID> best = new HashMap<String, UUID>();
+        for (UUID id : all) {
+            String name = Bukkit.getOfflinePlayer(id).getName();
+            if (name == null) continue;
+            String key = name.toLowerCase(Locale.ROOT);
+            UUID current = best.get(key);
+            if (current == null) {
+                best.put(key, id);
+            } else if (getElo(id) > getElo(current)) {
+                removeRanked(current);
+                best.put(key, id);
+            } else {
+                removeRanked(id);
+            }
+        }
+        plugin.saveConfig();
+    }
+
+    private void removeRanked(UUID id) {
+        plugin.getConfig().set("ranked.elo." + id, null);
+        plugin.getConfig().set("ranked.stats." + id, null);
+    }
+
+    // Joueurs classes, par elo decroissant. Un pseudo n'apparait qu'une fois.
     public List<UUID> rankedIds() {
         List<UUID> ids = new ArrayList<UUID>();
         if (plugin.getConfig().isConfigurationSection("ranked.elo")) {
@@ -832,7 +869,15 @@ public class BedFightManager implements Listener, CommandExecutor {
                 return Integer.compare(getElo(b), getElo(a));
             }
         });
-        return ids;
+        List<UUID> unique = new ArrayList<UUID>();
+        List<String> seen = new ArrayList<String>();
+        for (UUID id : ids) {
+            String name = Bukkit.getOfflinePlayer(id).getName();
+            if (name == null || seen.contains(name.toLowerCase(Locale.ROOT))) continue;
+            seen.add(name.toLowerCase(Locale.ROOT));
+            unique.add(id);
+        }
+        return unique;
     }
 
     private void showLeaderboard(CommandSender sender) {
@@ -1314,7 +1359,7 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
-        if (!isEnabled()) return;
+        // Groupe et file sont nettoyes meme si le BedFight est desactive.
         Player player = event.getPlayer();
         UUID id = player.getUniqueId();
 
