@@ -161,6 +161,10 @@ public class BedFightManager implements Listener, CommandExecutor {
         return name.length() <= max ? name : name.substring(0, max - 1) + ".";
     }
 
+    public boolean isRankedQueued(Player player) {
+        return rankedQueue.contains(player.getUniqueId());
+    }
+
     // Secondes passees en file d'attente, -1 si le joueur n'est pas en file.
     public long queueSeconds(Player player) {
         UUID id = player.getUniqueId();
