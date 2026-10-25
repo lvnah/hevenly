@@ -26,6 +26,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.command.Command;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Entity;
@@ -66,6 +67,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
     private static final int ISLAND_RADIUS = 15;
+    // Distance horizontale maximale du centre de l'arene pendant un match.
+    private static final double MAX_HORIZONTAL_DISTANCE = 15.0;
     // Hauteur de l'ile sous et au-dessus du spawn.
     private static final int ISLAND_DOWN = 5;
     private static final int ISLAND_UP = 6;
@@ -713,8 +716,7 @@ public class BedFightManager implements Listener, CommandExecutor {
     public void register() {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         removeDuplicateRanked();
-        String[] commands = {"bfsetspawn", "bfsetbed", "bfstart", "bfleave", "invite",
-                "bfarenas", "bfarena", "elo", "leaderboard"};
+        String[] commands = {"bf", "bfleave", "invite", "elo", "leaderboard"};
         for (String name : commands) {
             if (plugin.getCommand(name) != null) {
                 plugin.getCommand(name).setExecutor(this);
@@ -731,7 +733,42 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        String name = command.getName().toLowerCase(Locale.ROOT);
+        return run(sender, command.getName().toLowerCase(Locale.ROOT), args);
+    }
+
+    private boolean run(CommandSender sender, String name, String[] args) {
+
+        // /bf : une seule commande pour gerer le BedFight, qui relaie vers les actions ci-dessous.
+        if (name.equals("bf")) {
+            String usage = "Utilisation : /bf arenes | tp <nom> | spawn <rouge|bleu> <nom> | lit <rouge|bleu> <nom>"
+                    + " | renommer <nom> <nouveau> | supprimer <nom> | start | leave";
+            if (args.length == 0) {
+                sender.sendMessage(ChatColor.RED + usage);
+                return true;
+            }
+            String[] rest = Arrays.copyOfRange(args, 1, args.length);
+            switch (args[0].toLowerCase(Locale.ROOT)) {
+                case "arenes":
+                    return run(sender, "bfarenas", rest);
+                case "tp":
+                    return run(sender, "bfarena", rest);
+                case "spawn":
+                    return run(sender, "bfsetspawn", teamArgs(rest));
+                case "lit":
+                    return run(sender, "bfsetbed", teamArgs(rest));
+                case "start":
+                    return run(sender, "bfstart", rest);
+                case "leave":
+                    return run(sender, "bfleave", rest);
+                case "renommer":
+                    return renameArena(sender, rest);
+                case "supprimer":
+                    return deleteArena(sender, rest);
+                default:
+                    sender.sendMessage(ChatColor.RED + usage);
+                    return true;
+            }
+        }
 
         if (name.equals("bfsetspawn") || name.equals("bfsetbed")) {
             if (!(sender instanceof Player)) {
@@ -953,6 +990,95 @@ public class BedFightManager implements Listener, CommandExecutor {
                     + (name == null ? "?" : name) + ChatColor.GRAY + " - " + ChatColor.GREEN + elo
                     + ChatColor.GRAY + " (" + tierName(elo) + ") " + getStat(id, "wins") + "V / "
                     + getStat(id, "losses") + "D");
+        }
+    }
+
+    // Equipe en francais ou en anglais : rouge/red, bleu/blue.
+    private String[] teamArgs(String[] args) {
+        if (args.length == 0) return args;
+        String[] result = args.clone();
+        switch (args[0].toLowerCase(Locale.ROOT)) {
+            case "rouge":
+                result[0] = "red";
+                break;
+            case "bleu":
+                result[0] = "blue";
+                break;
+            default:
+                break;
+        }
+        return result;
+    }
+
+    private boolean renameArena(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player) || !isAdmin((Player) sender)) {
+            sender.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
+            return true;
+        }
+        if (args.length != 2) {
+            sender.sendMessage(ChatColor.RED + "Utilisation : /bf renommer <nom> <nouveau>");
+            return true;
+        }
+        String from = args[0].toLowerCase(Locale.ROOT);
+        String to = args[1].toLowerCase(Locale.ROOT);
+        if (!arenaNames().contains(from)) {
+            sender.sendMessage(ChatColor.RED + "Arene introuvable.");
+            return true;
+        }
+        if (to.isEmpty() || to.contains(".") || arenaNames().contains(to)) {
+            sender.sendMessage(ChatColor.RED + "Nom invalide ou deja utilise.");
+            return true;
+        }
+        if (isArenaBusy(from)) {
+            sender.sendMessage(ChatColor.RED + "Cette arene est en jeu. Reessaie quand la partie est finie.");
+            return true;
+        }
+
+        copyArena(ARENA_PREFIX + from, ARENA_PREFIX + to);
+        plugin.getConfig().set(ARENA_PREFIX + from, null);
+        plugin.saveConfig();
+        for (Map.Entry<UUID, String> entry : preferredArena.entrySet()) {
+            if (from.equals(entry.getValue())) entry.setValue(to);
+        }
+        sender.sendMessage(HevenlyPlugin.PREFIX + "Arene " + from + " renommee en " + to + ".");
+        return true;
+    }
+
+    private boolean deleteArena(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player) || !isAdmin((Player) sender)) {
+            sender.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
+            return true;
+        }
+        if (args.length != 1) {
+            sender.sendMessage(ChatColor.RED + "Utilisation : /bf supprimer <nom>");
+            return true;
+        }
+        String name = args[0].toLowerCase(Locale.ROOT);
+        if (!arenaNames().contains(name)) {
+            sender.sendMessage(ChatColor.RED + "Arene introuvable.");
+            return true;
+        }
+        if (isArenaBusy(name)) {
+            sender.sendMessage(ChatColor.RED + "Cette arene est en jeu. Reessaie quand la partie est finie.");
+            return true;
+        }
+
+        plugin.getConfig().set(ARENA_PREFIX + name, null);
+        plugin.saveConfig();
+        // Les joueurs qui avaient choisi cette map repassent en aleatoire.
+        preferredArena.values().removeAll(Collections.singleton(name));
+        sender.sendMessage(HevenlyPlugin.PREFIX + "Arene " + name + " supprimee.");
+        return true;
+    }
+
+    // Copie toutes les valeurs d'une arene vers une autre (spawns, lits).
+    private void copyArena(String from, String to) {
+        ConfigurationSection source = plugin.getConfig().getConfigurationSection(from);
+        if (source == null) return;
+        for (String key : source.getKeys(true)) {
+            if (!source.isConfigurationSection(key)) {
+                plugin.getConfig().set(to + "." + key, source.get(key));
+            }
         }
     }
 
@@ -1347,6 +1473,40 @@ public class BedFightManager implements Listener, CommandExecutor {
         match.rememberOriginal(new BlockKey(event.getBlockPlaced().getWorld().getName(),
                 event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()),
                 replaced.getType(), replaced.getRawData());
+    }
+
+    // En match, on ne s'eloigne pas de plus de 15 blocs (horizontalement) du centre de l'arene.
+    @EventHandler
+    public void onMatchBounds(PlayerMoveEvent event) {
+        Match match = activeMatchOf(event.getPlayer().getUniqueId());
+        if (match == null) return;
+        Location center = arenaCenter(match.arena);
+        if (center == null || event.getTo() == null) return;
+        if (!center.getWorld().equals(event.getTo().getWorld())) return;
+
+        double before = horizontalDistance(event.getFrom(), center);
+        double after = horizontalDistance(event.getTo(), center);
+        // Seul un mouvement vers l'exterieur est bloque ; un joueur deja au-dela peut revenir.
+        if (after > MAX_HORIZONTAL_DISTANCE && after > before) {
+            event.setCancelled(true);
+        }
+    }
+
+    private double horizontalDistance(Location location, Location center) {
+        double dx = location.getX() - center.getX();
+        double dz = location.getZ() - center.getZ();
+        return Math.sqrt(dx * dx + dz * dz);
+    }
+
+    // Centre de l'arene : milieu des deux spawns d'equipe.
+    private Location arenaCenter(String arena) {
+        Location red = readLocation(ARENA_PREFIX + arena + ".spawns.red");
+        Location blue = readLocation(ARENA_PREFIX + arena + ".spawns.blue");
+        if (red == null || blue == null) return null;
+        return new Location(red.getWorld(),
+                (red.getX() + blue.getX()) / 2.0,
+                red.getY(),
+                (red.getZ() + blue.getZ()) / 2.0);
     }
 
     // En match, mort des la couche -1 pour aller plus vite. Hors match, rien ne change.

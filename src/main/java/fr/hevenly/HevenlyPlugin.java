@@ -404,8 +404,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
             player.sendMessage(PREFIX + "Outils mod :");
             player.sendMessage(ChatColor.YELLOW + "/cc " + ChatColor.GRAY + "- Vider le chat");
-            player.sendMessage(ChatColor.YELLOW + "/bfarenas " + ChatColor.GRAY + "- Voir les arenes");
-            player.sendMessage(ChatColor.YELLOW + "/bfarena <nom> " + ChatColor.GRAY + "- Aller dans une arene");
+            player.sendMessage(ChatColor.YELLOW + "/bf arenes " + ChatColor.GRAY + "- Voir les arenes");
+            player.sendMessage(ChatColor.YELLOW + "/bf tp <nom> " + ChatColor.GRAY + "- Aller dans une arene");
             return true;
         }
 
@@ -502,8 +502,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             player.sendMessage(ChatColor.YELLOW + "/clearchat " + ChatColor.GRAY + "- Vider le chat");
         }
         if (isArenaStaff(player)) {
-            player.sendMessage(ChatColor.YELLOW + "/bfarenas " + ChatColor.GRAY + "- Voir les arenes");
-            player.sendMessage(ChatColor.YELLOW + "/bfarena <nom> " + ChatColor.GRAY + "- Aller dans une arene");
+            player.sendMessage(ChatColor.YELLOW + "/bf arenes " + ChatColor.GRAY + "- Voir les arenes");
+            player.sendMessage(ChatColor.YELLOW + "/bf tp <nom> " + ChatColor.GRAY + "- Aller dans une arene");
         }
         if (player.hasPermission("hevenly.setrank")) {
             player.sendMessage(ChatColor.YELLOW + "/setrank <joueur> <grade> " + ChatColor.GRAY + "- Changer un grade");
@@ -673,16 +673,18 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (matchColor != null) {
             // En match : pas de grade, le pseudo a la couleur choisie ou celle de l'equipe.
             teamPrefix = (nameColor != null ? nameColor : matchColor).toString();
-        } else if (!nametagEnabled.getOrDefault(getPlayerKey(target), true)
-                || "default".equalsIgnoreCase(rank)) {
+        } else if ("default".equalsIgnoreCase(rank)) {
             // Grade default : pas de prefixe, pseudo blanc.
             teamPrefix = (nameColor != null ? nameColor : getRankColor(rank)).toString();
         } else {
             String label = getRankLabel(rank);
-            if ("premium".equalsIgnoreCase(rank)) label = "PREM";
             ChatColor shownColor = nameColor != null ? nameColor : getRankColor(rank);
             teamPrefix = ChatColor.GRAY + "[" + shownColor + label
                     + ChatColor.GRAY + "] " + shownColor;
+            // 16 caracteres max par prefixe : si le grade est long (PREMIUM), crochets dans la couleur du grade.
+            if (teamPrefix.length() > 16) {
+                teamPrefix = shownColor + "[" + label + "] " + shownColor;
+            }
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
         team.setPrefix(teamPrefix);
@@ -1155,12 +1157,6 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     private void openNametagGui(Player player) {
         Inventory inventory = Bukkit.createInventory(null, 27, CONFIG_GUI_TITLE);
-        boolean enabled = nametagEnabled.getOrDefault(getPlayerKey(player), true);
-        inventory.setItem(11, createGuiItem(enabled ? Material.NAME_TAG : Material.BARRIER,
-                (enabled ? ChatColor.GREEN : ChatColor.RED) + "Prefixe du grade : "
-                        + (enabled ? "ACTIVE" : "DESACTIVE"),
-                ChatColor.GRAY + "Affiche le grade au-dessus de la tete et dans le TAB.",
-                ChatColor.YELLOW + "Clique pour changer"));
         PlayerColor chosen = getStoredColor(player);
         inventory.setItem(13, createGuiItem(Material.WOOL,
                 ChatColor.AQUA + "Couleur du pseudo",
@@ -1359,16 +1355,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 connectToServer(player, "duo");
             }
         } else if (CONFIG_GUI_TITLE.equals(title)) {
-            if (event.getRawSlot() == 11) {
-                String key = getPlayerKey(player);
-                boolean enabled = !nametagEnabled.getOrDefault(key, true);
-                nametagEnabled.put(key, enabled);
-                saveNametagSettings();
-                refreshAllBoards();
-                openNametagGui(player);
-                player.sendMessage(ChatColor.GREEN + "Prefixe du grade "
-                        + (enabled ? "active" : "desactive") + ".");
-            } else if (event.getRawSlot() == 13) {
+            if (event.getRawSlot() == 13) {
                 if (!canChooseColor(getRank(player))) {
                     player.sendMessage(PREFIX + "Cette option est reservee aux grades Plus, Premium, Mod et Owner.");
                     return;
