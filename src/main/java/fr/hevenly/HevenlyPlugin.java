@@ -790,8 +790,6 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             Objective objective = board.getObjective("hevenly");
             if (objective == null) continue;
             // 8 lettres en prefixe et 5 en suffixe : chaque lettre compte pour 2 caracteres de couleur.
-            // En file d'attente, la ligne du site n'est pas affichee.
-            if (bedFightManager.queueSeconds(player) >= 0) continue;
             String[] parts = websiteParts(shine);
             setSidebarTeamLine(board, objective, "hv_sb6", "§6", parts[0], parts[1], 1);
         }
@@ -849,12 +847,18 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             // En file d'attente : seulement le temps d'attente.
             long waiting = bedFightManager.queueSeconds(player);
             if (waiting >= 0) {
-                // Separateurs gardes ; seules les lignes du lobby et du match disparaissent.
-                for (int i : new int[] {3, 4, 6, 7}) {
-                    removeSidebarLine(board, "hv_sb" + i, i == 7 ? "§0" : "§" + i);
-                }
+                // Separateurs, site et lignes de file gardes ; les lignes du lobby (Couleur, et Elo hors file classee) disparaissent.
+                boolean ranked = bedFightManager.isRankedQueued(player);
+                removeSidebarLine(board, "hv_sb7", "§0");
+                if (!ranked) removeSidebarLine(board, "hv_sb4", "§4");
+                String map = bedFightManager.getPreferredArena(player);
                 setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
                 setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fFile d'attente", " §7» §a" + waiting + " sec", 6);
+                setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fMap", " §7» §a"
+                        + BedFightManager.shortName(map == null ? "Aléatoire" : map, 9), 5);
+                if (ranked) {
+                    setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo", " §7» §a" + getPlayerElo(player), 4);
+                }
                 setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
                 continue;
             }
