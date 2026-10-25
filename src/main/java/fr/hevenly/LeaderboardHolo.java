@@ -129,8 +129,8 @@ class LeaderboardHolo {
         }
         // Recompenses de fin de saison, affichees sous le classement.
         lines.add(ChatColor.YELLOW + "Fin de saison :");
-        lines.add(ChatColor.GRAY + "1er : grade " + ChatColor.RED + "PREMIUM" + ChatColor.GRAY + " 1 mois");
-        lines.add(ChatColor.GRAY + "2e et 3e : grade " + ChatColor.RED + "PLUS" + ChatColor.GRAY + " 1 mois");
+        lines.add(ChatColor.GRAY + "PREMIER : grade " + ChatColor.RED + "PREMIUM" + ChatColor.GRAY + " 1 mois");
+        lines.add(ChatColor.GRAY + "DEUXIEME / TROISIEME: grade " + ChatColor.RED + "PLUS" + ChatColor.GRAY + " 1 mois");
         return lines;
     }
 }
