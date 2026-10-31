@@ -67,8 +67,6 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
     private static final int ISLAND_RADIUS = 15;
-    // Distance horizontale maximale du spawn de son equipe pendant un match.
-    private static final double MAX_HORIZONTAL_DISTANCE = 15.0;
     // Hauteur de l'ile sous et au-dessus du spawn.
     private static final int ISLAND_DOWN = 5;
     private static final int ISLAND_UP = 6;
@@ -1473,27 +1471,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         match.rememberOriginal(new BlockKey(event.getBlockPlaced().getWorld().getName(),
                 event.getBlockPlaced().getX(), event.getBlockPlaced().getY(), event.getBlockPlaced().getZ()),
                 replaced.getType(), replaced.getRawData());
-    }
-
-    // En match, on ne s'eloigne pas de plus de 15 blocs (horizontalement) du spawn de son equipe, c'est-a-dire de son ile.
-    @EventHandler
-    public void onMatchBounds(PlayerMoveEvent event) {
-        Location center = teamSpawn(event.getPlayer());
-        if (center == null || event.getTo() == null) return;
-        if (!center.getWorld().equals(event.getTo().getWorld())) return;
-
-        double before = horizontalDistance(event.getFrom(), center);
-        double after = horizontalDistance(event.getTo(), center);
-        // Seul un mouvement vers l'exterieur est bloque ; un joueur deja au-dela peut revenir.
-        if (after > MAX_HORIZONTAL_DISTANCE && after > before) {
-            event.setCancelled(true);
-        }
-    }
-
-    private double horizontalDistance(Location location, Location center) {
-        double dx = location.getX() - center.getX();
-        double dz = location.getZ() - center.getZ();
-        return Math.sqrt(dx * dx + dz * dz);
     }
 
     // En match, mort des la couche -1 pour aller plus vite. Hors match, rien ne change.
