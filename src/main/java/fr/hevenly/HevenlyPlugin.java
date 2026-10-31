@@ -1453,14 +1453,21 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerDeath(PlayerDeathEvent event) {
         // Pas d'ecran de mort : le joueur reapparait tout de suite.
         final Player dead = event.getEntity();
-        Bukkit.getScheduler().runTask(this, new Runnable() {
+        // Respawn apres 3 secondes, puis le joueur peut etre frappe tout de suite.
+        Bukkit.getScheduler().runTaskLater(this, new Runnable() {
             @Override
             public void run() {
                 if (dead.isOnline() && dead.isDead()) {
                     dead.spigot().respawn();
+                    Bukkit.getScheduler().runTask(HevenlyPlugin.this, new Runnable() {
+                        @Override
+                        public void run() {
+                            if (dead.isOnline()) dead.setNoDamageTicks(0);
+                        }
+                    });
                 }
             }
-        });
+        }, 60L);
 
         Iterator<ItemStack> iterator = event.getDrops().iterator();
 

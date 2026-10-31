@@ -628,19 +628,28 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private String freeArena() {
         for (String name : arenaNames()) {
-            if (isArenaComplete(name) && !isArenaBusy(name)) return name;
+            if (isArenaFree(name)) return name;
         }
         return null;
     }
 
     private boolean isArenaFree(String name) {
-        return isArenaComplete(name) && !isArenaBusy(name);
+        return isArenaUsable(name) && !isArenaBusy(name);
+    }
+
+    // Une arene est utilisable si elle est complete et activee.
+    private boolean isArenaUsable(String name) {
+        return isArenaEnabled(name) && isArenaComplete(name);
+    }
+
+    private boolean isArenaEnabled(String name) {
+        return plugin.getConfig().getBoolean(ARENA_PREFIX + name + ".enabled", true);
     }
 
     public List<String> completeArenaNames() {
         List<String> names = new ArrayList<String>();
         for (String name : arenaNames()) {
-            if (isArenaComplete(name)) names.add(name);
+            if (isArenaUsable(name)) names.add(name);
         }
         return names;
     }
@@ -687,7 +696,7 @@ public class BedFightManager implements Listener, CommandExecutor {
 
     private boolean hasAnyArena() {
         for (String name : arenaNames()) {
-            if (isArenaComplete(name)) return true;
+            if (isArenaUsable(name)) return true;
         }
         return false;
     }
@@ -739,7 +748,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         // /bf : une seule commande pour gerer le BedFight, qui relaie vers les actions ci-dessous.
         if (name.equals("bf")) {
             String usage = "Utilisation : /bf arenes | tp <nom> | spawn <rouge|bleu> <nom> | lit <rouge|bleu> <nom>"
-                    + " | renommer <nom> <nouveau> | supprimer <nom> | start | leave";
+                    + " | renommer <nom> <nouveau> | activer <nom> | desactiver <nom> | supprimer <nom> | start | leave";
             if (args.length == 0) {
                 sender.sendMessage(ChatColor.RED + usage);
                 return true;
@@ -762,6 +771,10 @@ public class BedFightManager implements Listener, CommandExecutor {
                     return renameArena(sender, rest);
                 case "supprimer":
                     return deleteArena(sender, rest);
+                case "activer":
+                    return setArenaEnabled(sender, rest, true);
+                case "desactiver":
+                    return setArenaEnabled(sender, rest, false);
                 default:
                     sender.sendMessage(ChatColor.RED + usage);
                     return true;
@@ -1042,6 +1055,27 @@ public class BedFightManager implements Listener, CommandExecutor {
         return true;
     }
 
+    // Active ou desactive une arene : une arene desactivee n'accueille plus de matchs.
+    private boolean setArenaEnabled(CommandSender sender, String[] args, boolean enabled) {
+        if (!(sender instanceof Player) || !isAdmin((Player) sender)) {
+            sender.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
+            return true;
+        }
+        if (args.length != 1) {
+            sender.sendMessage(ChatColor.RED + "Utilisation : /bf " + (enabled ? "activer" : "desactiver") + " <nom>");
+            return true;
+        }
+        String name = args[0].toLowerCase(Locale.ROOT);
+        if (!arenaNames().contains(name)) {
+            sender.sendMessage(ChatColor.RED + "Arene introuvable.");
+            return true;
+        }
+        plugin.getConfig().set(ARENA_PREFIX + name + ".enabled", enabled);
+        plugin.saveConfig();
+        sender.sendMessage(HevenlyPlugin.PREFIX + "Arene " + name + (enabled ? " activee." : " desactivee."));
+        return true;
+    }
+
     private boolean deleteArena(CommandSender sender, String[] args) {
         if (!(sender instanceof Player) || !isAdmin((Player) sender)) {
             sender.sendMessage(ChatColor.RED + "Tu n'as pas la permission !");
@@ -1089,7 +1123,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         player.sendMessage(HevenlyPlugin.PREFIX + "Arenes BedFight :");
         for (String name : names) {
             String status;
-            if (!isArenaComplete(name)) {
+            if (!isArenaEnabled(name)) {
+                status = ChatColor.GRAY + "desactivee";
+            } else if (!isArenaComplete(name)) {
                 status = ChatColor.RED + "incomplete";
             } else if (isArenaBusy(name)) {
                 status = ChatColor.YELLOW + "en jeu";
