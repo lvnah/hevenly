@@ -67,7 +67,7 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
     private static final int ISLAND_RADIUS = 15;
-    // Distance horizontale maximale du centre de l'arene pendant un match.
+    // Distance horizontale maximale du spawn de son equipe pendant un match.
     private static final double MAX_HORIZONTAL_DISTANCE = 15.0;
     // Hauteur de l'ile sous et au-dessus du spawn.
     private static final int ISLAND_DOWN = 5;
@@ -1475,12 +1475,10 @@ public class BedFightManager implements Listener, CommandExecutor {
                 replaced.getType(), replaced.getRawData());
     }
 
-    // En match, on ne s'eloigne pas de plus de 15 blocs (horizontalement) du centre de l'arene.
+    // En match, on ne s'eloigne pas de plus de 15 blocs (horizontalement) du spawn de son equipe, c'est-a-dire de son ile.
     @EventHandler
     public void onMatchBounds(PlayerMoveEvent event) {
-        Match match = activeMatchOf(event.getPlayer().getUniqueId());
-        if (match == null) return;
-        Location center = arenaCenter(match.arena);
+        Location center = teamSpawn(event.getPlayer());
         if (center == null || event.getTo() == null) return;
         if (!center.getWorld().equals(event.getTo().getWorld())) return;
 
@@ -1496,17 +1494,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         double dx = location.getX() - center.getX();
         double dz = location.getZ() - center.getZ();
         return Math.sqrt(dx * dx + dz * dz);
-    }
-
-    // Centre de l'arene : milieu des deux spawns d'equipe.
-    private Location arenaCenter(String arena) {
-        Location red = readLocation(ARENA_PREFIX + arena + ".spawns.red");
-        Location blue = readLocation(ARENA_PREFIX + arena + ".spawns.blue");
-        if (red == null || blue == null) return null;
-        return new Location(red.getWorld(),
-                (red.getX() + blue.getX()) / 2.0,
-                red.getY(),
-                (red.getZ() + blue.getZ()) / 2.0);
     }
 
     // En match, mort des la couche -1 pour aller plus vite. Hors match, rien ne change.
