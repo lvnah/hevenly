@@ -17,7 +17,7 @@ commands:
     permission: hevenly.setrank
   bf:
     description: Gestion du BedFight (arenes, spawns, lits, partie)
-    usage: /bf arenes | tp <nom> | spawn <rouge|bleu> <nom> | lit <rouge|bleu> <nom> | renommer <nom> <nouveau> | supprimer <nom> | start | leave
+    usage: /bf arenes | tp <nom> | spawn <rouge|bleu> <nom> | lit <rouge|bleu> <nom> | renommer <nom> <nouveau> | activer <nom> | desactiver <nom> | supprimer <nom> | start | leave
   elo:
     description: Affiche ton elo classe ou celui d'un joueur
     usage: /elo [pseudo]
