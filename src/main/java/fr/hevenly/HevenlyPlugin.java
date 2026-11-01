@@ -686,10 +686,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             ChatColor shownColor = nameColor != null ? nameColor : getRankColor(rank);
             teamPrefix = ChatColor.GRAY + "[" + shownColor + label
                     + ChatColor.GRAY + "] " + shownColor;
-            // 16 caracteres max par prefixe : si le grade est long (PREMIUM), on enleve l'espace,
-            // les crochets restent gris.
+            // 16 caracteres max par prefixe. Si le grade est long (PREMIUM), le crochet fermant
+            // prend la couleur du grade pour que le pseudo garde sa couleur.
             if (teamPrefix.length() > 16) {
-                teamPrefix = ChatColor.GRAY + "[" + label + ChatColor.GRAY + "]" + shownColor;
+                teamPrefix = ChatColor.GRAY + "[" + shownColor + label + shownColor + "] " + shownColor;
             }
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);

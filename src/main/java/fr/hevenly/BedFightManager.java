@@ -593,7 +593,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         List<UUID> members = membersOf(match, team);
         if (members.isEmpty()) return;
         PlayerColor chosen = match.colors.get(members.get(0));
-        DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.WHITE);
+        DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.BLUE);
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
         if (spawn == null) return;
 
@@ -1161,8 +1161,13 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     private ChatColor teamColor(String team) {
-        // Couleurs du theme du serveur : rouge et blanc.
+        // Messages du chat : couleurs du theme du serveur, rouge et blanc.
         return "red".equals(team) ? ChatColor.RED : ChatColor.WHITE;
+    }
+
+    // Pseudo, laine et armure de l'equipe : rouge et bleu.
+    private ChatColor pseudoTeamColor(String team) {
+        return "red".equals(team) ? ChatColor.RED : ChatColor.BLUE;
     }
 
     // --------------------------------------------------
@@ -1403,7 +1408,7 @@ public class BedFightManager implements Listener, CommandExecutor {
     private void preparePlayer(Match match, Player player, String team) {
         player.setGameMode(GameMode.SURVIVAL);
         PlayerColor chosen = match.colors.get(player.getUniqueId());
-        plugin.setMatchColor(player, teamColor(team), chosen);
+        plugin.setMatchColor(player, pseudoTeamColor(team), chosen);
         player.setHealth(20.0);
         player.setFoodLevel(20);
         player.setFireTicks(0);
@@ -1419,8 +1424,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     // Kit identique pour tous les BedFight : cuir teinte aux couleurs de l'equipe.
     private void giveMatchKit(Player player, String team, PlayerColor chosen) {
         boolean red = "red".equals(team);
-        DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.WHITE);
-        Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.WHITE);
+        DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.BLUE);
+        Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.BLUE);
         PlayerInventory inv = player.getInventory();
         inv.clear();
         inv.setArmorContents(null);
