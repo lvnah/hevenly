@@ -67,6 +67,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     private static final int MAX_BUILD_HEIGHT = 10;
     // Rayon de la laine recolore autour du spawn de l'equipe.
     private static final int ISLAND_RADIUS = 15;
+    // Rayon autour de son propre lit ou la casse est interdite.
+    private static final int BED_PROTECTION_RADIUS = 2;
     // Hauteur de l'ile sous et au-dessus du spawn.
     private static final int ISLAND_DOWN = 5;
     private static final int ISLAND_UP = 6;
@@ -146,7 +148,18 @@ public class BedFightManager implements Listener, CommandExecutor {
         String duration = String.format(Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
         // Son propre lit : detruit par l'adversaire ou non.
         boolean destroyed = !Boolean.TRUE.equals(match.bedAlive.get(team));
-        return new String[] {names.length() == 0 ? "?" : names.toString(), duration, destroyed ? "Oui" : "Non"};
+        int mine = killsOf(match, player.getUniqueId());
+        int theirs = 0;
+        for (UUID id : opponents) {
+            theirs += killsOf(match, id);
+        }
+        return new String[] {names.length() == 0 ? "?" : names.toString(), duration, destroyed ? "Oui" : "Non",
+                String.valueOf(mine), String.valueOf(theirs)};
+    }
+
+    private int killsOf(Match match, UUID id) {
+        Integer count = match.kills.get(id);
+        return count == null ? 0 : count;
     }
 
     private void removeDroppedBeds(Location center) {
@@ -1359,6 +1372,21 @@ public class BedFightManager implements Listener, CommandExecutor {
         return false;
     }
 
+    // Vrai si le bloc est a moins de BED_PROTECTION_RADIUS blocs du lit de l'equipe du joueur.
+    private boolean isNearOwnBed(Match match, Player player, Block block) {
+        String team = match.teams.get(player.getUniqueId());
+        if (team == null) return false;
+        for (Location bed : getConfiguredBedLocations(match.arena, team)) {
+            if (bed.getWorld().equals(block.getWorld())
+                    && Math.abs(bed.getBlockX() - block.getX()) <= BED_PROTECTION_RADIUS
+                    && Math.abs(bed.getBlockY() - block.getY()) <= BED_PROTECTION_RADIUS
+                    && Math.abs(bed.getBlockZ() - block.getZ()) <= BED_PROTECTION_RADIUS) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private String bedTeamForBlock(String arena, Block block) {
         if (isConfiguredBedBlock(arena, block, "red")) return "red";
         if (isConfiguredBedBlock(arena, block, "blue")) return "blue";
@@ -1438,6 +1466,10 @@ public class BedFightManager implements Listener, CommandExecutor {
         Match match = activeMatchOf(player.getUniqueId());
         // Hors partie, HevenlyPlugin decide (/build).
         if (match == null) return;
+        if (plugin.isFrozen(player)) {
+            event.setCancelled(true);
+            return;
+        }
 
         Block block = event.getBlock();
         String bedTeam = bedTeamForBlock(match.arena, block);
@@ -1475,6 +1507,12 @@ public class BedFightManager implements Listener, CommandExecutor {
             return;
         }
 
+        // Pas de casse autour de son propre lit (rayon de 2 blocs).
+        if (isNearOwnBed(match, player, block)) {
+            event.setCancelled(true);
+            return;
+        }
+
         Material type = block.getType();
         if (type != Material.WOOL && type != Material.WOOD && type != Material.LOG && type != Material.LOG_2) {
             event.setCancelled(true);
@@ -1492,6 +1530,10 @@ public class BedFightManager implements Listener, CommandExecutor {
         Match match = activeMatchOf(player.getUniqueId());
         // Hors partie, HevenlyPlugin decide (/build).
         if (match == null) return;
+        if (plugin.isFrozen(player)) {
+            event.setCancelled(true);
+            return;
+        }
         Material type = event.getBlockPlaced().getType();
         if (type != Material.WOOL && type != Material.WOOD && type != Material.LOG && type != Material.LOG_2) {
             event.setCancelled(true);
@@ -1524,6 +1566,16 @@ public class BedFightManager implements Listener, CommandExecutor {
         Player player = event.getEntity();
         Match match = activeMatchOf(player.getUniqueId());
         if (match == null) return;
+
+        // Kill : le tueur est dans le meme match, dans l'autre equipe.
+        Player killer = player.getKiller();
+        if (killer != null && activeMatchOf(killer.getUniqueId()) == match) {
+            String killerTeam = match.teams.get(killer.getUniqueId());
+            if (killerTeam != null && !killerTeam.equals(match.teams.get(player.getUniqueId()))) {
+                Integer current = match.kills.get(killer.getUniqueId());
+                match.kills.put(killer.getUniqueId(), current == null ? 1 : current + 1);
+            }
+        }
 
         event.getDrops().clear();
         event.setDroppedExp(0);
@@ -1708,6 +1760,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         // Couleur choisie retenue pour ce match (un joueur absent de cette map prend la couleur de son equipe).
         private final Map<UUID, PlayerColor> colors = new HashMap<UUID, PlayerColor>();
         private final long startedAt = System.currentTimeMillis();
+        // Kills de chaque joueur dans ce match.
+        private final Map<UUID, Integer> kills = new HashMap<UUID, Integer>();
         private boolean finished = false;
 
         private Match(String arena, boolean ranked, boolean duo) {

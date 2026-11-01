@@ -31,6 +31,7 @@ import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
+import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.FoodLevelChangeEvent;
 import org.bukkit.event.entity.PlayerDeathEvent;
@@ -83,6 +84,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String QUEUE_LEAVE_NAME = ChatColor.RED + "Quitter la file";
     private static final String WEBSITE = "hevenly.games";
     private int shineTick = 0;
+    // Duree d'immobilite apres un respawn.
+    private static final long FREEZE_MS = 3000L;
+    // Pseudo UUID -> moment ou le gel prend fin.
+    private final Map<UUID, Long> frozenUntil = new ConcurrentHashMap<UUID, Long>();
     private static final String STRIKE_LINE = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "---------------------------";
     // 16 caracteres (codes couleur compris) en prefixe + 16 en suffixe : limite 1.8 par equipe.
     private static final String SIDEBAR_SEPARATOR = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "------------";
@@ -875,7 +880,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fLit détruit ",
                         "§7» " + ("Oui".equals(match[2]) ? "§aOui" : "§cNon"), 4);
                 setSidebarTeamLine(board, objective, "hv_sb5", "§5", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 2);
-                removeSidebarLine(board, "hv_sb7", "§0");
+                setSidebarTeamLine(board, objective, "hv_sb7", "§0", "§fKills ",
+                        "§7» §a" + match[3] + " §c" + match[4], 3);
                 continue;
             }
 
@@ -1453,21 +1459,17 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     public void onPlayerDeath(PlayerDeathEvent event) {
         // Pas d'ecran de mort : le joueur reapparait tout de suite.
         final Player dead = event.getEntity();
-        // Respawn apres 3 secondes, puis le joueur peut etre frappe tout de suite.
-        Bukkit.getScheduler().runTaskLater(this, new Runnable() {
+        // Respawn tout de suite, sans ecran de mort, puis le joueur reste fige 3 secondes.
+        Bukkit.getScheduler().runTask(this, new Runnable() {
             @Override
             public void run() {
                 if (dead.isOnline() && dead.isDead()) {
                     dead.spigot().respawn();
-                    Bukkit.getScheduler().runTask(HevenlyPlugin.this, new Runnable() {
-                        @Override
-                        public void run() {
-                            if (dead.isOnline()) dead.setNoDamageTicks(0);
-                        }
-                    });
+                    frozenUntil.put(dead.getUniqueId(), System.currentTimeMillis() + FREEZE_MS);
+                    dead.setNoDamageTicks(0);
                 }
             }
-        }, 60L);
+        });
 
         Iterator<ItemStack> iterator = event.getDrops().iterator();
 
@@ -1644,6 +1646,51 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         if (event.getNewGameMode() == GameMode.CREATIVE && !event.getPlayer().isOp()) {
             event.setCancelled(true);
         }
+    }
+
+    // Apres un respawn : invincible, immobile, sans rien faire pendant FREEZE_MS.
+    boolean isFrozen(Player player) {
+        Long until = frozenUntil.get(player.getUniqueId());
+        return until != null && System.currentTimeMillis() < until;
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenDamage(EntityDamageEvent event) {
+        if (event.getEntity() instanceof Player && isFrozen((Player) event.getEntity())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenHit(EntityDamageByEntityEvent event) {
+        if (event.getDamager() instanceof Player && isFrozen((Player) event.getDamager())) {
+            event.setCancelled(true);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenMove(PlayerMoveEvent event) {
+        if (isFrozen(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenInteract(PlayerInteractEvent event) {
+        if (isFrozen(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenBreak(BlockBreakEvent event) {
+        if (isFrozen(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenPlace(BlockPlaceEvent event) {
+        if (isFrozen(event.getPlayer())) event.setCancelled(true);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onFrozenDrop(PlayerDropItemEvent event) {
+        if (isFrozen(event.getPlayer())) event.setCancelled(true);
     }
 
     // Eau : retour au spawn du lobby, ou au spawn de son equipe en match.
