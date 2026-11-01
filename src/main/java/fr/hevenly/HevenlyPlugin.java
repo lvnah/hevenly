@@ -187,7 +187,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             public void run() {
                 leaderboardHolo.restore();
             }
-        }, 1200L, 1200L);
+        }, 600L, 600L);
 
         // Defilement du reflet sur hevenly.games, toutes les 2 ticks.
         Bukkit.getScheduler().runTaskTimer(this, new Runnable() {
@@ -1664,6 +1664,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     // Apres un respawn : invincible, immobile, sans rien faire pendant FREEZE_MS.
+    // Recalcule l'hologramme du top 10 tout de suite (appele quand l'elo change).
+    void refreshLeaderboard() {
+        if (leaderboardHolo != null) leaderboardHolo.restore();
+    }
+
     // Pendant le gel, le joueur est cache aux autres : impossible de le viser des son respawn.
     private void setHiddenFromOthers(Player player, boolean hidden) {
         for (Player other : Bukkit.getOnlinePlayers()) {
