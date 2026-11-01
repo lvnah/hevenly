@@ -1385,10 +1385,9 @@ public class BedFightManager implements Listener, CommandExecutor {
         return false;
     }
 
-    // Blocs que l'on peut casser en match : laine, bois, buches, verre et argile teintes (ile).
+    // Blocs que l'on peut casser en match : laine et bois uniquement. Le verre et l'argile de l'ile ne se cassent pas.
     private boolean isMatchBreakable(Material type) {
-        return type == Material.WOOL || type == Material.WOOD || type == Material.LOG || type == Material.LOG_2
-                || type == Material.STAINED_GLASS || type == Material.STAINED_CLAY;
+        return type == Material.WOOL || type == Material.WOOD || type == Material.LOG || type == Material.LOG_2;
     }
 
     // Casse refusee : on renvoie le bloc reel au client, sinon il reste visuellement absent.
