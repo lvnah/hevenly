@@ -1385,6 +1385,19 @@ public class BedFightManager implements Listener, CommandExecutor {
         return false;
     }
 
+    // Blocs que l'on peut casser en match : laine, bois, buches, verre et argile teintes (ile).
+    private boolean isMatchBreakable(Material type) {
+        return type == Material.WOOL || type == Material.WOOD || type == Material.LOG || type == Material.LOG_2
+                || type == Material.STAINED_GLASS || type == Material.STAINED_CLAY;
+    }
+
+    // Casse refusee : on renvoie le bloc reel au client, sinon il reste visuellement absent.
+    private void refuseBreak(BlockBreakEvent event, Player player) {
+        event.setCancelled(true);
+        Block block = event.getBlock();
+        player.sendBlockChange(block.getLocation(), block.getType(), block.getData());
+    }
+
     // Vrai si le bloc est a moins de BED_PROTECTION_RADIUS blocs du lit de l'equipe du joueur.
     private boolean isNearOwnBed(Match match, Player player, Block block) {
         String team = match.teams.get(player.getUniqueId());
@@ -1522,13 +1535,13 @@ public class BedFightManager implements Listener, CommandExecutor {
 
         // Pas de casse autour de son propre lit (rayon de 2 blocs).
         if (isNearOwnBed(match, player, block)) {
-            event.setCancelled(true);
+            refuseBreak(event, player);
             return;
         }
 
         Material type = block.getType();
-        if (type != Material.WOOL && type != Material.WOOD && type != Material.LOG && type != Material.LOG_2) {
-            event.setCancelled(true);
+        if (!isMatchBreakable(type)) {
+            refuseBreak(event, player);
             return;
         }
         // Le bloc casse est remis en place a la fin de la partie, et le joueur le recupere tout de suite.
