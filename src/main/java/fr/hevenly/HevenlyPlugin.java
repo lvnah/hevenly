@@ -28,6 +28,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
+import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryType.SlotType;
 import org.bukkit.event.player.PlayerGameModeChangeEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
@@ -1541,6 +1542,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
         // En partie, l'inventaire est libre sauf l'armure en cuir, qui reste equipee.
         if (bedFightManager.isInMatch(player)) {
+            // Pas de jet : clic hors inventaire, ou action de jet dans l'inventaire ouvert.
+            InventoryAction action = event.getAction();
+            if (event.getRawSlot() == -999
+                    || action == InventoryAction.DROP_ONE_SLOT || action == InventoryAction.DROP_ALL_SLOT
+                    || action == InventoryAction.DROP_ONE_CURSOR || action == InventoryAction.DROP_ALL_CURSOR) {
+                event.setCancelled(true);
+                return;
+            }
             if (event.getSlotType() == SlotType.ARMOR) event.setCancelled(true);
             return;
         }
@@ -1825,7 +1834,8 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
 
     @EventHandler
     public void onPlayerDropItem(PlayerDropItemEvent event) {
-        if (isProtectedItem(event.getItemDrop().getItemStack())) {
+        // En match, on peut ranger ses objets mais pas les jeter.
+        if (isProtectedItem(event.getItemDrop().getItemStack()) || bedFightManager.isInMatch(event.getPlayer())) {
             event.setCancelled(true);
         }
     }
