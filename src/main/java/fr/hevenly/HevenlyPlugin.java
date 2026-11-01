@@ -686,9 +686,10 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             ChatColor shownColor = nameColor != null ? nameColor : getRankColor(rank);
             teamPrefix = ChatColor.GRAY + "[" + shownColor + label
                     + ChatColor.GRAY + "] " + shownColor;
-            // 16 caracteres max par prefixe : si le grade est long (PREMIUM), crochets dans la couleur du grade.
+            // 16 caracteres max par prefixe : si le grade est long (PREMIUM), on enleve l'espace,
+            // les crochets restent gris.
             if (teamPrefix.length() > 16) {
-                teamPrefix = shownColor + "[" + label + "] " + shownColor;
+                teamPrefix = ChatColor.GRAY + "[" + label + ChatColor.GRAY + "]" + shownColor;
             }
         }
         if (teamPrefix.length() > 16) teamPrefix = teamPrefix.substring(0, 16);
@@ -862,7 +863,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
                 setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fFile d'attente", " §7» §a" + waiting + " sec", 6);
                 setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fMap", " §7» §a"
-                        + BedFightManager.shortName(map == null ? "Aléatoire" : map, 9), 5);
+                        + BedFightManager.shortName(map == null ? "Aléatoire" : BedFightManager.displayArena(map), 9), 5);
                 if (ranked) {
                     setSidebarTeamLine(board, objective, "hv_sb4", "§4", "§fElo", " §7» §a" + getPlayerElo(player), 4);
                 }
@@ -1130,7 +1131,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
         String current = bedFightManager.getPreferredArena(player);
         for (int i = 0; i < Math.min(arenas.size(), 12); i++) {
             String name = arenas.get(i);
-            inventory.setItem(10 + i, createGuiItem(Material.MAP, ChatColor.AQUA + name,
+            inventory.setItem(10 + i, createGuiItem(Material.MAP, ChatColor.AQUA + BedFightManager.displayArena(name),
                     name.equals(current) ? ChatColor.GREEN + "Choisie" : ChatColor.GRAY + "Clique pour choisir"));
         }
         inventory.setItem(22, createGuiItem(Material.EYE_OF_ENDER, ChatColor.YELLOW + "Aleatoire",
@@ -1467,6 +1468,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                     dead.spigot().respawn();
                     frozenUntil.put(dead.getUniqueId(), System.currentTimeMillis() + FREEZE_MS);
                     dead.setNoDamageTicks(0);
+                    // Fin du gel : on retire l'etat et l'immunite restante, pour que le joueur soit bien vulnerable.
+                    Bukkit.getScheduler().runTaskLater(HevenlyPlugin.this, new Runnable() {
+                        @Override
+                        public void run() {
+                            frozenUntil.remove(dead.getUniqueId());
+                            if (dead.isOnline()) dead.setNoDamageTicks(0);
+                        }
+                    }, FREEZE_MS / 50L);
                 }
             }
         });
