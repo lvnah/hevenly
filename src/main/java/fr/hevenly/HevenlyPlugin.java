@@ -580,7 +580,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             case "owner": return "OWNER";
             case "mod": return "MOD";
             case "helper": return "HELPER";
-            case "premium": return "PREMIUM";
+            case "premium": return "PREM";
             case "plus": return "PLUS";
             default: return "BASIQUE";
         }
@@ -1473,7 +1473,11 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                         @Override
                         public void run() {
                             frozenUntil.remove(dead.getUniqueId());
-                            if (dead.isOnline()) dead.setNoDamageTicks(0);
+                            if (!dead.isOnline()) return;
+                            dead.setNoDamageTicks(0);
+                            dead.setHealth(dead.getMaxHealth());
+                            // Mouvement serveur : le joueur redevient vulnerable sans attendre qu'il bouge.
+                            dead.teleport(dead.getLocation());
                         }
                     }, FREEZE_MS / 50L);
                 }

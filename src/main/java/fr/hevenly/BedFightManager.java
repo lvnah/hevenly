@@ -559,8 +559,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         }
         recolorIsland(match, "red");
         recolorIsland(match, "blue");
-        broadcastMatch(match, ChatColor.GOLD + "La partie commence ! " + teamNames(match, "red")
-                + ChatColor.GRAY + " contre " + teamNames(match, "blue") + ChatColor.GOLD + ".");
+        broadcastMatch(match, ChatColor.WHITE + "La partie commence ! " + teamNames(match, "red")
+                + ChatColor.WHITE + " contre " + teamNames(match, "blue") + ChatColor.WHITE + ".");
         checkMatchEnd(match, "");
     }
 
@@ -1507,9 +1507,9 @@ public class BedFightManager implements Listener, CommandExecutor {
                     removeDroppedBeds(broken);
                 }
             });
-            broadcastMatch(match, ChatColor.GOLD + "Le lit de l'equipe " + teamColor(bedTeam)
-                    + bedTeam.toUpperCase(Locale.ROOT) + ChatColor.GOLD + " a ete detruit par "
-                    + player.getName() + " !");
+            broadcastMatch(match, ChatColor.WHITE + "Le lit de l'equipe " + teamColor(bedTeam)
+                    + bedTeam.toUpperCase(Locale.ROOT) + ChatColor.WHITE + " a ete detruit par "
+                    + pseudoTeamColor(ownTeam) + player.getName() + ChatColor.WHITE + " !");
             for (UUID id : match.players) {
                 Player participant = Bukkit.getPlayer(id);
                 if (participant != null) {
@@ -1675,7 +1675,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         for (UUID id : membersOf(match, team)) {
             Player player = Bukkit.getPlayer(id);
             if (names.length() > 0) names.append(ChatColor.GRAY).append(", ");
-            names.append(teamColor(team)).append(player == null ? "?" : player.getName());
+            names.append(pseudoTeamColor(team)).append(player == null ? "?" : player.getName());
         }
         return names.toString();
     }
@@ -1687,11 +1687,11 @@ public class BedFightManager implements Listener, CommandExecutor {
         boolean blueAlive = match.countAlive("blue") > 0;
         if (redAlive && blueAlive) return;
         if (!redAlive && !blueAlive) {
-            finishMatch(match, null, ChatColor.YELLOW + "La partie est annulee.");
+            finishMatch(match, null, ChatColor.WHITE + "La partie est annulee.");
             return;
         }
         String winner = redAlive ? "red" : "blue";
-        finishMatch(match, winner, teamNames(match, winner) + ChatColor.GREEN
+        finishMatch(match, winner, teamNames(match, winner) + ChatColor.WHITE
                 + " remporte la partie" + reason + " !");
     }
 
@@ -1700,7 +1700,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         match.finished = true;
         matches.remove(match);
 
-        broadcastMatch(match, ChatColor.GOLD + "Partie terminee ! " + message);
+        broadcastMatch(match, ChatColor.WHITE + "Partie terminee ! " + message);
         restoreChangedBlocks(match);
         restoreBeds(match.arena);
         if (match.ranked && winner != null) applyRankedResult(match, winner);
