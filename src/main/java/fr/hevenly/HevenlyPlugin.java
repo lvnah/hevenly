@@ -85,7 +85,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     private static final String WEBSITE = "hevenly.games";
     private int shineTick = 0;
     // Duree d'immobilite apres un respawn.
-    private static final long FREEZE_MS = 3000L;
+    private static final long FREEZE_MS = 2000L;
     // Pseudo UUID -> moment ou le gel prend fin.
     private final Map<UUID, Long> frozenUntil = new ConcurrentHashMap<UUID, Long>();
     private static final String STRIKE_LINE = ChatColor.GRAY + "" + ChatColor.STRIKETHROUGH + "---------------------------";
@@ -890,7 +890,7 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
             setSidebarTeamLine(board, objective, "hv_sb1", "§1", SIDEBAR_SEPARATOR, SIDEBAR_SEPARATOR, 7);
             setSidebarTeamLine(board, objective, "hv_sb2", "§2", "§fEn ligne ", "§7» §a" + onlineCount, 6);
             // Chaque suffixe reçoit sa propre couleur pour éviter les couleurs héritées.
-            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade ", "§7» " + getRankColor(rank) + rank, 5);
+            setSidebarTeamLine(board, objective, "hv_sb3", "§3", "§fGrade ", "§7» " + getRankColor(getRank(player)) + rank, 5);
             // Couleur par defaut, ou la couleur choisie et enregistree dans la config.
             PlayerColor stored = getStoredColor(player);
             setSidebarTeamLine(board, objective, "hv_sb7", "§0", "§fCouleur ",
@@ -1467,12 +1467,14 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
                 if (dead.isOnline() && dead.isDead()) {
                     dead.spigot().respawn();
                     frozenUntil.put(dead.getUniqueId(), System.currentTimeMillis() + FREEZE_MS);
+                    setHiddenFromOthers(dead, true);
                     dead.setNoDamageTicks(0);
                     // Fin du gel : on retire l'etat et l'immunite restante, pour que le joueur soit bien vulnerable.
                     Bukkit.getScheduler().runTaskLater(HevenlyPlugin.this, new Runnable() {
                         @Override
                         public void run() {
                             frozenUntil.remove(dead.getUniqueId());
+                            setHiddenFromOthers(dead, false);
                             if (!dead.isOnline()) return;
                             dead.setNoDamageTicks(0);
                             dead.setHealth(dead.getMaxHealth());
@@ -1662,6 +1664,18 @@ public class HevenlyPlugin extends JavaPlugin implements Listener {
     }
 
     // Apres un respawn : invincible, immobile, sans rien faire pendant FREEZE_MS.
+    // Pendant le gel, le joueur est cache aux autres : impossible de le viser des son respawn.
+    private void setHiddenFromOthers(Player player, boolean hidden) {
+        for (Player other : Bukkit.getOnlinePlayers()) {
+            if (other.equals(player)) continue;
+            if (hidden) {
+                other.hidePlayer(player);
+            } else {
+                other.showPlayer(player);
+            }
+        }
+    }
+
     boolean isFrozen(Player player) {
         Long until = frozenUntil.get(player.getUniqueId());
         return until != null && System.currentTimeMillis() < until;
