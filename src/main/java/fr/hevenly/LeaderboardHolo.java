@@ -104,12 +104,19 @@ class LeaderboardHolo {
         if (name == null) return false;
         String plain = ChatColor.stripColor(name);
         return plain.equals("TOP 10 LEADERBOARD") || plain.equals("Aucune partie classee")
-                || plain.matches("^\\d+\\. .+ - \\d+$");
+                || plain.equals("Fin de saison :")
+                || plain.matches("^\\d+\\. .+ - \\d+$")
+                || plain.matches("^1er : grade .*")
+                || plain.matches("^2e et 3e : grade .*");
     }
 
+    // Retire les anciennes lignes autour du point de pose. Les metadonnees disparaissent au /reload,
+    // on reconnait donc aussi les lignes a leur texte.
     private void clear(Location base) {
         for (Entity entity : base.getWorld().getNearbyEntities(base, CLEAR_RADIUS, CLEAR_RADIUS, CLEAR_RADIUS)) {
-            if (entity.hasMetadata(META)) entity.remove();
+            if (!(entity instanceof ArmorStand)) continue;
+            ArmorStand stand = (ArmorStand) entity;
+            if (stand.hasMetadata(META) || isLeaderboardText(stand.getCustomName())) stand.remove();
         }
     }
 
