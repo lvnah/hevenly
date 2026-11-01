@@ -593,7 +593,7 @@ public class BedFightManager implements Listener, CommandExecutor {
         List<UUID> members = membersOf(match, team);
         if (members.isEmpty()) return;
         PlayerColor chosen = match.colors.get(members.get(0));
-        DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.BLUE);
+        DyeColor dye = chosen != null ? chosen.dye : ("red".equals(team) ? DyeColor.RED : DyeColor.WHITE);
         Location spawn = readLocation(ARENA_PREFIX + match.arena + ".spawns." + team);
         if (spawn == null) return;
 
@@ -678,7 +678,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             player.sendMessage(HevenlyPlugin.PREFIX + "Map : aleatoire.");
         } else {
             preferredArena.put(player.getUniqueId(), arena);
-            player.sendMessage(HevenlyPlugin.PREFIX + "Map choisie : " + arena + ". Tu tomberas dessus si elle est libre.");
+            player.sendMessage(HevenlyPlugin.PREFIX + "Map choisie : " + displayArena(arena) + ". Tu tomberas dessus si elle est libre.");
         }
     }
 
@@ -899,7 +899,7 @@ public class BedFightManager implements Listener, CommandExecutor {
                 return true;
             }
             player.teleport(spawn);
-            player.sendMessage(HevenlyPlugin.PREFIX + "Tu es teleporte a l'arene " + args[0].toLowerCase(Locale.ROOT) + ".");
+            player.sendMessage(HevenlyPlugin.PREFIX + "Tu es teleporte a l'arene " + displayArena(args[0].toLowerCase(Locale.ROOT)) + ".");
             return true;
         }
 
@@ -1015,6 +1015,12 @@ public class BedFightManager implements Listener, CommandExecutor {
                     + ChatColor.GRAY + " (" + tierName(elo) + ") " + getStat(id, "wins") + "V / "
                     + getStat(id, "losses") + "D");
         }
+    }
+
+    // Nom d'arene affiche avec une majuscule (le stockage reste en minuscules).
+    static String displayArena(String name) {
+        if (name == null || name.isEmpty()) return name;
+        return Character.toUpperCase(name.charAt(0)) + name.substring(1);
     }
 
     // Equipe en francais ou en anglais : rouge/red, bleu/blue.
@@ -1145,7 +1151,7 @@ public class BedFightManager implements Listener, CommandExecutor {
             } else {
                 status = ChatColor.GREEN + "libre";
             }
-            player.sendMessage(ChatColor.GRAY + "- " + ChatColor.AQUA + name + ChatColor.GRAY + " : " + status);
+            player.sendMessage(ChatColor.GRAY + "- " + ChatColor.AQUA + displayArena(name) + ChatColor.GRAY + " : " + status);
         }
         player.sendMessage(ChatColor.GRAY + "Tape /bfarena <nom> pour y aller.");
     }
@@ -1155,7 +1161,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     }
 
     private ChatColor teamColor(String team) {
-        return "red".equals(team) ? ChatColor.RED : ChatColor.BLUE;
+        // Couleurs du theme du serveur : rouge et blanc.
+        return "red".equals(team) ? ChatColor.RED : ChatColor.WHITE;
     }
 
     // --------------------------------------------------
@@ -1412,8 +1419,8 @@ public class BedFightManager implements Listener, CommandExecutor {
     // Kit identique pour tous les BedFight : cuir teinte aux couleurs de l'equipe.
     private void giveMatchKit(Player player, String team, PlayerColor chosen) {
         boolean red = "red".equals(team);
-        DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.BLUE);
-        Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.BLUE);
+        DyeColor dye = chosen != null ? chosen.dye : (red ? DyeColor.RED : DyeColor.WHITE);
+        Color color = chosen != null ? chosen.leather() : (red ? Color.RED : Color.WHITE);
         PlayerInventory inv = player.getInventory();
         inv.clear();
         inv.setArmorContents(null);
