@@ -467,16 +467,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         }
     }
 
-    private void announceSearch() {
-        for (UUID id : queuedPlayerIds()) {
-            Player player = Bukkit.getPlayer(id);
-            if (player == null) continue;
-            long waited = queueSeconds(player);
-            if (waited < 0) continue;
-            player.sendMessage(HevenlyPlugin.PREFIX + "Recherche d'un adversaire en cours... " + waited + "s");
-        }
-    }
-
     private List<UUID> queuedPlayerIds() {
         List<UUID> ids = new ArrayList<UUID>(soloQueue);
         ids.addAll(rankedQueue);
@@ -748,13 +738,6 @@ public class BedFightManager implements Listener, CommandExecutor {
         Bukkit.getPluginManager().registerEvents(this, plugin);
         removeDuplicateRanked();
         String[] commands = {"bf", "bfleave", "invite", "elo", "leaderboard"};
-        // Toutes les 10 secondes, les joueurs en file voient que la recherche continue.
-        Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
-            @Override
-            public void run() {
-                announceSearch();
-            }
-        }, 200L, 200L);
         for (String name : commands) {
             if (plugin.getCommand(name) != null) {
                 plugin.getCommand(name).setExecutor(this);
@@ -1548,9 +1531,15 @@ public class BedFightManager implements Listener, CommandExecutor {
             event.setCancelled(true);
             return;
         }
-        // Le bloc casse sera remis en place a la fin de la partie.
+        // Le bloc casse est remis en place a la fin de la partie, et le joueur le recupere tout de suite.
         match.rememberOriginal(new BlockKey(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()),
                 type, block.getData());
+        event.setCancelled(true);
+        ItemStack drop = new ItemStack(type, 1, (short) block.getData());
+        block.setType(Material.AIR);
+        for (ItemStack rest : player.getInventory().addItem(drop).values()) {
+            block.getWorld().dropItemNaturally(block.getLocation(), rest);
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -1705,11 +1694,11 @@ public class BedFightManager implements Listener, CommandExecutor {
         boolean blueAlive = match.countAlive("blue") > 0;
         if (redAlive && blueAlive) return;
         if (!redAlive && !blueAlive) {
-            finishMatch(match, null, HevenlyPlugin.PREFIX + "La partie est annulee.");
+            finishMatch(match, null, HevenlyPlugin.PREFIX + "Partie terminee ! Partie annulee.");
             return;
         }
         String winner = redAlive ? "red" : "blue";
-        finishMatch(match, winner, HevenlyPlugin.PREFIX + teamNames(match, winner) + ChatColor.WHITE
+        finishMatch(match, winner, HevenlyPlugin.PREFIX + "Partie terminee ! " + teamNames(match, winner) + ChatColor.WHITE
                 + " remporte la partie" + reason + " !");
     }
 
@@ -1718,7 +1707,8 @@ public class BedFightManager implements Listener, CommandExecutor {
         match.finished = true;
         matches.remove(match);
 
-        broadcastMatch(match, HevenlyPlugin.PREFIX + "Partie terminee ! " + message);
+        // "message" contient deja le prefixe et le texte de fin : un seul message.
+        broadcastMatch(match, message);
         restoreChangedBlocks(match);
         restoreBeds(match.arena);
         if (match.ranked && winner != null) applyRankedResult(match, winner);
